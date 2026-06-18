@@ -1,0 +1,65 @@
+# Diagnostic agent container image
+#
+# Builds the agent runtime server with diagnostic tools baked in.
+# Phase 1a: tools and skills are part of the image.
+# Phase 2: genericize with mounted tools/skills via volumes.
+#
+# Build:
+#   podman build -f deploy/diagnostic-agent/Containerfile -t diagnostic-agent:latest .
+#
+# Run:
+#   podman run -p 8080:8080 \
+#     -e OLLAMA_URL=http://host.containers.internal:11434/v1 \
+#     diagnostic-agent:latest
+
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+# Install uv for fast dependency resolution
+RUN pip install --no-cache-dir uv
+
+# Copy dependency files and required project metadata for layer caching
+COPY pyproject.toml uv.lock LICENSE README.md ./
+
+# Install runtime dependencies only (no dev group)
+RUN uv sync --no-dev --no-install-project
+
+# Copy source code
+COPY src/ src/
+COPY examples/skills/ skills/
+
+# Install the project itself
+RUN uv sync --no-dev
+
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Copy the virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy source and skills
+COPY --from=builder /app/src /app/src
+COPY --from=builder /app/skills /app/skills
+
+# Set Python path so imports work
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/src" \
+    AGENT_NAME="diagnostic-agent" \
+    AGENT_MODEL="qwen3.6:latest" \
+    OLLAMA_URL="http://localhost:11434/v1" \
+    SKILLS_DIR="/app/skills"
+
+RUN useradd -r -u 1001 agent
+USER 1001
+
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import httpx; r = httpx.get('http://localhost:8080/healthz'); exit(0 if r.status_code == 200 else 1)"
+
+# Run the agent runtime server
+CMD ["python", "-m", "uvicorn", "agents.diagnostic.entrypoint:app", "--host", "0.0.0.0", "--port", "8080"]

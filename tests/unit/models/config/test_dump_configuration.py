@@ -219,6 +219,7 @@ def test_dump_configuration_minimal_cfg(tmp_path: Path) -> None:
                 "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
             },
             "skills": None,
+            "agents": None,
         }
 
 
@@ -436,6 +437,7 @@ def test_dump_configuration_valid_values(tmp_path: Path) -> None:
                 "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
             },
             "skills": None,
+            "agents": None,
         }
 
 
@@ -804,6 +806,7 @@ def test_dump_configuration_with_quota_limiters(tmp_path: Path) -> None:
                 "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
             },
             "skills": None,
+            "agents": None,
         }
 
 
@@ -1056,6 +1059,7 @@ def test_dump_configuration_with_quota_limiters_different_values(
                 "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
             },
             "skills": None,
+            "agents": None,
         }
 
 
@@ -1283,6 +1287,7 @@ def test_dump_configuration_byok(tmp_path: Path) -> None:
                 "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
             },
             "skills": None,
+            "agents": None,
         }
 
 
@@ -1495,6 +1500,7 @@ def test_dump_configuration_pg_namespace(tmp_path: Path) -> None:
                 "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
             },
             "skills": None,
+            "agents": None,
         }
 
 
@@ -1867,6 +1873,7 @@ def test_dump_configuration_allow_degraded_mode(tmp_path: Path) -> None:
                 "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
             },
             "skills": None,
+            "agents": None,
         }
 
 
@@ -2085,6 +2092,7 @@ def test_dump_configuration_max_retries_settings(tmp_path: Path) -> None:
                 "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
             },
             "skills": None,
+            "agents": None,
         }
 
 
@@ -2303,6 +2311,7 @@ def test_dump_configuration_retry_count_settings(tmp_path: Path) -> None:
                 "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
             },
             "skills": None,
+            "agents": None,
         }
 
 
@@ -2528,4 +2537,5 @@ def test_dump_configuration_specific_compaction_values(tmp_path: Path) -> None:
                 "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
             },
             "skills": None,
+            "agents": None,
         }

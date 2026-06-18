@@ -159,6 +159,12 @@ test-e2e-tagged: ## Run e2e tests with E2E_BEHAVE_TAG_EXPR (default: all @e2e_gr
 test-e2e-tagged-local: ## Same as test-e2e-tagged without script wrapper
 	uv run behave --color --format pretty --tags="$(E2E_BEHAVE_TAG_EXPR)" -D dump_errors=true @tests/e2e/test_list.txt
 
+e2e-cloud-agents: ## Run cloud agent E2E tests — fast only (requires agent pod on localhost:8081)
+	uv run behave --color --format pretty --tags="not @slow" tests/e2e/features/cloud_agents.feature
+
+e2e-cloud-agents-full: ## Run all cloud agent E2E tests including slow LLM scenarios
+	uv run behave --color --format pretty tests/e2e/features/cloud_agents.feature
+
 benchmarks: ## Run benchmarks
 	uv run python -m pytest -vv tests/benchmarks/
 

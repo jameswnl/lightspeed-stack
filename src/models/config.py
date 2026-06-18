@@ -2060,6 +2060,64 @@ class SkillsConfiguration(ConfigurationBase):
     )
 
 
+class AgentResourceConfig(ConfigurationBase):
+    """Resource limits for a cloud agent pod.
+
+    Attributes:
+        max_tokens_per_run: Maximum tokens the agent may consume per run.
+        timeout_seconds: Maximum seconds before the agent run is cancelled.
+    """
+
+    max_tokens_per_run: int = Field(
+        default=50000,
+        title="Max tokens per run",
+        description="Maximum token budget for a single agent run.",
+    )
+    timeout_seconds: int = Field(
+        default=600,
+        title="Timeout seconds",
+        description="Maximum duration in seconds for a single agent run.",
+    )
+
+
+class AgentEndpointConfig(ConfigurationBase):
+    """Configuration for a single cloud agent pod.
+
+    Attributes:
+        name: Unique identifier for this agent.
+        endpoint: HTTP endpoint URL for the agent pod (required, authoritative).
+        type: Agent type classification.
+        skills: List of skill names available to this agent.
+        resources: Optional resource limits.
+    """
+
+    name: str = Field(
+        ...,
+        title="Agent name",
+        description="Unique identifier for this agent.",
+    )
+    endpoint: str = Field(
+        ...,
+        title="Agent endpoint",
+        description="HTTP endpoint URL for the agent pod (e.g. http://diagnostic-agent:8080).",
+    )
+    type: str = Field(
+        ...,
+        title="Agent type",
+        description="Agent type: conversational, diagnostic, or autonomous.",
+    )
+    skills: list[str] = Field(
+        default_factory=list,
+        title="Skills",
+        description="List of skill names available to this agent.",
+    )
+    resources: Optional[AgentResourceConfig] = Field(
+        default=None,
+        title="Resource limits",
+        description="Optional resource limits for this agent.",
+    )
+
+
 class Configuration(ConfigurationBase):
     """Global service configuration."""
 
@@ -2236,6 +2294,13 @@ class Configuration(ConfigurationBase):
         default=None,
         title="Agent skills",
         description="Agent skills configuration. Specifies paths to skill directories.",
+    )
+
+    agents: Optional[list[AgentEndpointConfig]] = Field(
+        default=None,
+        title="Cloud agents",
+        description="Cloud agent pod endpoints. Each entry defines an agent "
+        "that runs in a separate container and is reachable via HTTP.",
     )
 
     @model_validator(mode="after")

@@ -1,0 +1,52 @@
+# Monitoring agent container image
+#
+# Build:
+#   podman build -f deploy/monitoring-agent/Containerfile -t monitoring-agent:latest .
+#
+# Run:
+#   podman run -p 8082:8080 \
+#     -e OLLAMA_URL=http://host.containers.internal:11434/v1 \
+#     -e DISPATCH_ENDPOINT=http://diagnostic-agent:8080 \
+#     -e CLUSTER_SCENARIO=bad_deploy \
+#     -e MONITOR_INTERVAL=60 \
+#     monitoring-agent:latest
+
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml uv.lock LICENSE README.md ./
+
+RUN uv sync --no-dev --no-install-project
+
+COPY src/ src/
+COPY examples/skills/ skills/
+
+RUN uv sync --no-dev
+
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/src /app/src
+COPY --from=builder /app/skills /app/skills
+
+RUN useradd -r -u 1001 agent
+USER 1001
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/src" \
+    AGENT_NAME="monitoring-agent" \
+    AGENT_MODEL="qwen3.6:latest" \
+    OLLAMA_URL="http://localhost:11434/v1" \
+    DISPATCH_ENDPOINT="http://diagnostic-agent:8080" \
+    CLUSTER_SCENARIO="healthy" \
+    MONITOR_INTERVAL="300"
+
+EXPOSE 8080
+
+CMD ["python", "-m", "uvicorn", "agents.monitoring.entrypoint:app", "--host", "0.0.0.0", "--port", "8080"]

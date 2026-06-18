@@ -34,7 +34,7 @@ class TestAgentEndpointConfig:
             skills=["openshift-troubleshooting"],
         )
         assert cfg.name == "diagnostic-agent"
-        assert cfg.endpoint == "http://diagnostic-agent:8080"
+        assert str(cfg.endpoint) == "http://diagnostic-agent:8080/"
         assert cfg.type == "diagnostic"
         assert cfg.skills == ["openshift-troubleshooting"]
         assert cfg.resources is None
@@ -94,6 +94,34 @@ class TestAgentEndpointConfig:
             type="diagnostic",
         )
         assert cfg.skills == []
+
+    def test_invalid_url_rejected(self) -> None:
+        """Test that a malformed URL is rejected."""
+        with pytest.raises(ValidationError):
+            AgentEndpointConfig(
+                name="diag",
+                endpoint="not-a-url",
+                type="diagnostic",
+            )
+
+    def test_invalid_type_rejected(self) -> None:
+        """Test that an unsupported agent type is rejected."""
+        with pytest.raises(ValidationError):
+            AgentEndpointConfig(
+                name="diag",
+                endpoint="http://diag:8080",
+                type="unknown_type",
+            )
+
+    def test_valid_types_accepted(self) -> None:
+        """Test that all valid agent types are accepted."""
+        for agent_type in ("conversational", "diagnostic", "autonomous"):
+            cfg = AgentEndpointConfig(
+                name="test",
+                endpoint="http://test:8080",
+                type=agent_type,
+            )
+            assert cfg.type == agent_type
 
     def test_json_round_trip(self) -> None:
         """Test serialization round-trip."""

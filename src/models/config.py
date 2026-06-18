@@ -2096,15 +2096,15 @@ class AgentEndpointConfig(ConfigurationBase):
         title="Agent name",
         description="Unique identifier for this agent.",
     )
-    endpoint: str = Field(
+    endpoint: AnyHttpUrl = Field(
         ...,
         title="Agent endpoint",
         description="HTTP endpoint URL for the agent pod (e.g. http://diagnostic-agent:8080).",
     )
-    type: str = Field(
+    type: Literal["conversational", "diagnostic", "autonomous"] = Field(
         ...,
         title="Agent type",
-        description="Agent type: conversational, diagnostic, or autonomous.",
+        description="Agent type classification.",
     )
     skills: list[str] = Field(
         default_factory=list,

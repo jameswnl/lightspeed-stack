@@ -33,9 +33,10 @@ spec:
       - get_recent_deploys
       - run_remediation
 
-  skills:
-    directories:
-      - /app/skills
+  # skills disabled for demo — pydantic-ai-skills not in base image
+  # skills:
+  #   directories:
+  #     - /app/skills
 
   lifecycle:
     type: request-response

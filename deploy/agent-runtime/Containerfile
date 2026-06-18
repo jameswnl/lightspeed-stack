@@ -1,0 +1,58 @@
+# Generic agent runtime template image
+#
+# ONE image for all agent types. Agent identity comes from mounted config:
+#   /app/agent.yaml    — agent definition (instructions, tools, lifecycle)
+#   /app/tools/         — Python tool modules
+#   /app/skills/        — SKILL.md directories
+#   /app/registry.yaml  — agent endpoint registry (for dispatch)
+#
+# Build:
+#   podman build -f deploy/agent-runtime/Containerfile -t agent-runtime:latest .
+#
+# Run as diagnostic agent:
+#   podman run -p 8080:8080 \
+#     -v ./agents/definitions/diagnostic-agent.yaml:/app/agent.yaml:ro \
+#     -v ./src/agents/diagnostic/tools.py:/app/tools/diagnostic_tools.py:ro \
+#     -v ./examples/skills:/app/skills:ro \
+#     -e OLLAMA_URL=http://host.containers.internal:11434/v1 \
+#     agent-runtime:latest
+
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml uv.lock LICENSE README.md ./
+
+RUN uv sync --no-dev --no-install-project
+
+COPY src/ src/
+
+RUN uv sync --no-dev
+
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/src /app/src
+
+# Create mount points for agent config, tools, skills, and registry
+RUN mkdir -p /app/tools /app/skills
+
+RUN useradd -r -u 1001 agent
+USER 1001
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/src:/app/tools" \
+    AGENT_DEFINITION="/app/agent.yaml" \
+    AGENT_REGISTRY="/app/registry.yaml" \
+    AGENT_MODEL="qwen3.6:latest" \
+    OLLAMA_URL="http://localhost:11434/v1" \
+    SKILLS_DIR="/app/skills"
+
+EXPOSE 8080
+
+CMD ["python", "-m", "uvicorn", "agents.runtime.generic_entrypoint:app", "--host", "0.0.0.0", "--port", "8080"]

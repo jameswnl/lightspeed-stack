@@ -9,12 +9,12 @@
 # Build:
 #   podman build -f deploy/agent-runtime/Containerfile -t agent-runtime:latest .
 #
-# Run as diagnostic agent:
+# Run as diagnostic agent (example):
 #   podman run -p 8080:8080 \
-#     -v ./agents/definitions/diagnostic-agent.yaml:/app/agent.yaml:ro \
-#     -v ./src/agents/diagnostic/tools.py:/app/tools/diagnostic_tools.py:ro \
-#     -v ./examples/skills:/app/skills:ro \
+#     -v ./examples/agents/definitions/diagnostic-agent.yaml:/app/agent.yaml:ro \
+#     -v ./examples/agents/tools/diagnostic_tools.py:/app/tools/diagnostic_tools.py:ro \
 #     -e OLLAMA_URL=http://host.containers.internal:11434/v1 \
+#     -e AGENT_MODEL=gpt-4o-mini \
 #     agent-runtime:latest
 
 FROM python:3.12-slim AS builder

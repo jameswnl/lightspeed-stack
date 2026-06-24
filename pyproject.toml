@@ -80,7 +80,9 @@ dependencies = [
     # Used for token estimation before LLM calls (LCORE-1569 / conversation compaction)
     "tiktoken>=0.8.0",
     # Used for Pydantic AI
-    "pydantic-ai>=1.99.0"
+    "pydantic-ai>=1.99.0",
+    # Used for graph-based workflow execution (Phase 5 exploration)
+    "pydantic-graph>=1.105.0",
 ]
 
 

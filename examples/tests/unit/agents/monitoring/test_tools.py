@@ -2,11 +2,11 @@
 
 import pytest
 
-from agents.diagnostic.cluster_state import (
+from examples.agents.diagnostic.cluster_state import (
     cluster_state,
     init_scenario,
 )
-from agents.monitoring.tools import get_cluster_summary
+from examples.agents.monitoring.tools import get_cluster_summary
 
 
 @pytest.fixture(autouse=True)

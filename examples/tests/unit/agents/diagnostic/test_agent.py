@@ -12,8 +12,8 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from agents.diagnostic.agent import create_diagnostic_agent, run_diagnostic
-from agents.diagnostic.cluster_state import (
+from examples.agents.diagnostic.agent import create_diagnostic_agent, run_diagnostic
+from examples.agents.diagnostic.cluster_state import (
     reset_cluster_healthy,
     simulate_bad_deploy,
     cluster_state,
@@ -202,7 +202,7 @@ class TestRunDiagnostic:
             ])
 
         mocker.patch(
-            "agents.diagnostic._model.get_model",
+            "examples.agents.diagnostic._model.get_model",
             return_value=FunctionModel(mock_llm),
         )
 
@@ -218,7 +218,7 @@ class TestRunDiagnostic:
     async def test_run_diagnostic_error(self, mocker: pytest.MonkeyPatch) -> None:
         """Test run_diagnostic returns error response on failure."""
         mocker.patch(
-            "agents.diagnostic._model.get_model",
+            "examples.agents.diagnostic._model.get_model",
             side_effect=RuntimeError("No LLM backend"),
         )
 

@@ -2,13 +2,13 @@
 
 import pytest
 
-from agents.diagnostic.cluster_state import (
+from examples.agents.diagnostic.cluster_state import (
     action_log,
     cluster_state,
     reset_cluster_healthy,
     simulate_bad_deploy,
 )
-from agents.diagnostic.tools import (
+from examples.agents.diagnostic.tools import (
     check_host,
     get_alerts,
     get_recent_deploys,

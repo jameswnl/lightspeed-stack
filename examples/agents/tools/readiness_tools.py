@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from agents.diagnostic.cluster_state import cluster_state
+from examples.agents.diagnostic.cluster_state import cluster_state
 
 
 class DeploymentReadiness(BaseModel):

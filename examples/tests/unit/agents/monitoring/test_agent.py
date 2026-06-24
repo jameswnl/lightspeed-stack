@@ -10,9 +10,9 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from agents.diagnostic.cluster_state import init_scenario
+from examples.agents.diagnostic.cluster_state import init_scenario
 from agents.models import MonitoringResult
-from agents.monitoring.agent import create_monitoring_agent
+from examples.agents.monitoring.agent import create_monitoring_agent
 
 
 @pytest.fixture(autouse=True)

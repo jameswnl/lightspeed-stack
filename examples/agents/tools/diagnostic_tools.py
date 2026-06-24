@@ -7,8 +7,8 @@ standalone output validator.
 
 from pydantic_ai import ModelRetry, RunContext
 
-from agents.diagnostic.cluster_state import cluster_state
-from agents.diagnostic.tools import (
+from examples.agents.diagnostic.cluster_state import cluster_state
+from examples.agents.diagnostic.tools import (
     check_host,
     get_alerts,
     get_recent_deploys,

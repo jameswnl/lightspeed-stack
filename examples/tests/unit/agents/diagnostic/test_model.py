@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agents.diagnostic._model import get_model
+from examples.agents.diagnostic._model import get_model
 
 
 class TestGetModel:
@@ -13,7 +13,7 @@ class TestGetModel:
 
     def setup_method(self) -> None:
         """Reset cached model between tests."""
-        import agents.diagnostic._model as mod
+        import examples.agents.diagnostic._model as mod
         mod._model = None
 
     def test_default_values(self) -> None:

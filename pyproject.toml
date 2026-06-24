@@ -214,7 +214,8 @@ build = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = [
-    "src"
+    "src",
+    ".",
 ]
 addopts = [
     "--import-mode=importlib",

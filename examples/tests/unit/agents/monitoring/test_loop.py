@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agents.diagnostic.cluster_state import init_scenario
+from examples.agents.diagnostic.cluster_state import init_scenario
 from agents.exceptions import AgentUnavailableError
 from agents.models import AgentRunResponse, MonitoringResult
-from agents.monitoring.loop import MonitoringLoop
+from examples.agents.monitoring.loop import MonitoringLoop
 
 
 def _make_monitoring_response(
@@ -96,7 +96,7 @@ class TestCheckAndDispatch:
     async def test_successful_dispatch_updates_local_state(self) -> None:
         """Test that local state is updated after successful dispatch."""
         init_scenario("bad_deploy")
-        from agents.diagnostic.cluster_state import cluster_state
+        from examples.agents.diagnostic.cluster_state import cluster_state
         assert cluster_state["hosts"]["web-02"]["status"] == "degraded"
 
         alerts = [{
@@ -205,7 +205,7 @@ class TestRedispatchPrevention:
     async def test_dispatch_resets_disk_state(self) -> None:
         """Regression: _mark_hosts_healthy must reset disk alongside CPU/memory/services."""
         init_scenario("healthy")
-        from agents.diagnostic.cluster_state import cluster_state, simulate_disk_growth
+        from examples.agents.diagnostic.cluster_state import cluster_state, simulate_disk_growth
         simulate_disk_growth("db-01", 92)
         assert cluster_state["hosts"]["db-01"]["disk"] == 92
 

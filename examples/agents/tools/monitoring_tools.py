@@ -5,8 +5,8 @@ Mountable at /app/tools/monitoring_tools.py in the agent-runtime container.
 
 from typing import Any
 
-from agents.diagnostic.cluster_state import cluster_state
-from agents.monitoring.tools import get_cluster_summary
+from examples.agents.diagnostic.cluster_state import cluster_state
+from examples.agents.monitoring.tools import get_cluster_summary
 
 
 def mark_hosts_healthy(alerts: list[dict[str, Any]]) -> None:

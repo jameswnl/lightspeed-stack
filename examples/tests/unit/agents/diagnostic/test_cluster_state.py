@@ -2,7 +2,7 @@
 
 import pytest
 
-from agents.diagnostic.cluster_state import (
+from examples.agents.diagnostic.cluster_state import (
     FIXED_DEPLOY_TIMESTAMP,
     action_log,
     cluster_state,

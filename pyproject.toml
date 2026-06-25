@@ -222,6 +222,9 @@ pythonpath = [
 addopts = [
     "--import-mode=importlib",
 ]
+markers = [
+    "e2e: end-to-end tests requiring Podman or K8s (deselect with -m 'not e2e')",
+]
 
 [tool.pylint.main]
 source-roots = "src"

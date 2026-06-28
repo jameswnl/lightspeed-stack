@@ -83,6 +83,8 @@ dependencies = [
     "pydantic-ai>=1.99.0",
     # Used for graph-based workflow execution (Phase 5 exploration)
     "pydantic-graph>=1.105.0",
+    # Used for durable workflow orchestration (PoC2 Temporal integration)
+    "temporalio>=1.9.0",
 ]
 
 

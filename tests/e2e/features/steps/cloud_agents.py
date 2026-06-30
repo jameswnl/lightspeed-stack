@@ -19,7 +19,9 @@ def step_diag_pod_running(context):
     """Verify the diagnostic agent pod is reachable."""
     try:
         resp = requests.get(f"{DIAG_BASE}/healthz", timeout=10)
-        assert resp.status_code == 200, f"Diagnostic agent not ready: {resp.status_code}"
+        assert (
+            resp.status_code == 200
+        ), f"Diagnostic agent not ready: {resp.status_code}"
     except requests.ConnectionError as exc:
         raise AssertionError(
             f"Cannot connect to diagnostic agent at {DIAG_BASE}: {exc}"
@@ -38,7 +40,9 @@ def step_monitor_pod_running(context):
     """Verify the monitoring agent pod is reachable."""
     try:
         resp = requests.get(f"{MONITOR_BASE}/healthz", timeout=10)
-        assert resp.status_code == 200, f"Monitoring agent not ready: {resp.status_code}"
+        assert (
+            resp.status_code == 200
+        ), f"Monitoring agent not ready: {resp.status_code}"
     except requests.ConnectionError as exc:
         raise AssertionError(
             f"Cannot connect to monitoring agent at {MONITOR_BASE}: {exc}"
@@ -120,9 +124,9 @@ def step_check_status(context, status_code):
 @then('The response body contains "{text}"')
 def step_body_contains(context, text):
     """Verify response body contains text."""
-    assert text in context.response.text, (
-        f"'{text}' not found in response: {context.response.text[:200]}"
-    )
+    assert (
+        text in context.response.text
+    ), f"'{text}' not found in response: {context.response.text[:200]}"
 
 
 @then("The response contains a valid AgentRunResponse")
@@ -155,17 +159,17 @@ def step_output_field_not_empty(context, field):
 def step_output_field_true(context, field):
     """Verify a boolean field in the output is true."""
     output = context.response.json().get("output", {})
-    assert output.get(field) is True, (
-        f"Field '{field}' is not true: {output.get(field)}"
-    )
+    assert (
+        output.get(field) is True
+    ), f"Field '{field}' is not true: {output.get(field)}"
 
 
 @then("The async submit response status is {status_code:d}")
 def step_async_status(context, status_code):
     """Verify async submit status code."""
-    assert context.response.status_code == status_code, (
-        f"Expected {status_code}, got {context.response.status_code}"
-    )
+    assert (
+        context.response.status_code == status_code
+    ), f"Expected {status_code}, got {context.response.status_code}"
 
 
 @then("The async submit response contains a run_id")
@@ -180,6 +184,7 @@ def step_async_has_run_id(context):
 def step_poll_status(context, status1, status2):
     """Verify poll response status is one of the expected values."""
     body = context.response.json()
-    assert body.get("status") in (status1, status2), (
-        f"Expected status '{status1}' or '{status2}', got: {body.get('status')}"
-    )
+    assert body.get("status") in (
+        status1,
+        status2,
+    ), f"Expected status '{status1}' or '{status2}', got: {body.get('status')}"

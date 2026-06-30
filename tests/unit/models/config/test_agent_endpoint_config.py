@@ -45,9 +45,7 @@ class TestAgentEndpointConfig:
             name="diag",
             endpoint="http://diag:8080",
             type="diagnostic",
-            resources=AgentResourceConfig(
-                max_tokens_per_run=10000, timeout_seconds=60
-            ),
+            resources=AgentResourceConfig(max_tokens_per_run=10000, timeout_seconds=60),
         )
         assert cfg.resources is not None
         assert cfg.resources.max_tokens_per_run == 10000

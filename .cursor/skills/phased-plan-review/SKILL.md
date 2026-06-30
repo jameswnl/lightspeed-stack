@@ -17,6 +17,8 @@ When this skill is invoked, follow the workflow it prescribes.
 
 Use this skill when reviewing design or task-planning documents for a multi-phase project.
 
+Always start a watcher and continue until you give out a `LGTM`.
+
 ## Scope
 
 Primary targets:
@@ -124,12 +126,12 @@ When the user asks to write the review out:
 
 Do not overwrite an existing finalized review unless the user explicitly asks.
 
-## Re-review After Plan Updates
+## Continuous Re-review Loop
 
-If the user wants continuous re-review while the doc is changing:
+After the first review is written, do not stop at a single pass.
 
 1. Write the current review first.
-2. Start a background watcher for the specific file.
+2. Start a background watcher for the specific file or requested review scope.
 3. Use a settle delay before acting:
    - normally 30 seconds for commit polling
    - 2 minutes if the user explicitly asks for a longer settle window while editing a doc
@@ -141,7 +143,7 @@ If the user wants continuous re-review while the doc is changing:
    - right before writing `LGTM`, do one more review that covers the whole requested batch/scope of plan changes, not just the most recent edits
    - in that fresh pass, actively look for newly visible second-order issues rather than only regression-checking old findings
    - if satisfied after the fresh pass, write a final file containing exactly `LGTM`
-5. Stop the watcher immediately after writing the final LGTM file.
+5. Stop the watcher immediately after writing the final `LGTM` file.
 
 ## LGTM Standard
 

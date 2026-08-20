@@ -34,8 +34,10 @@ from models.config import (
     ServiceConfiguration,
     ShieldConfiguration,
     SkillsConfiguration,
+    SpawnerConfiguration,
     SplunkConfiguration,
     UserDataCollection,
+    WorkflowEngineConfiguration,
 )
 from quota.quota_limiter import QuotaLimiter
 from quota.quota_limiter_factory import QuotaLimiterFactory
@@ -560,6 +562,20 @@ class AppConfig:  # pylint: disable=too-many-public-methods
         if self._configuration is None:
             raise LogicError("logic error: configuration is not loaded")
         return self._configuration.shields
+
+    @property
+    def workflow_engine_configuration(self) -> WorkflowEngineConfiguration:
+        """Return workflow engine configuration."""
+        if self._configuration is None:
+            raise LogicError("logic error: configuration is not loaded")
+        return self._configuration.workflow_engine
+
+    @property
+    def spawner_configuration(self) -> Optional[SpawnerConfiguration]:
+        """Return spawner configuration, or None if not provided."""
+        if self._configuration is None:
+            raise LogicError("logic error: configuration is not loaded")
+        return self._configuration.spawner
 
     @property
     def rag_id_mapping(self) -> dict[str, str]:

@@ -1316,6 +1316,15 @@ class Action(str, Enum):
     # User saved prompts (/v1/saved-prompts)
     MANAGE_SAVED_PROMPTS = "manage_saved_prompts"
 
+    # Agent execution (/v1/agents)
+    AGENT_RUN = "agent_run"
+
+    # Workflow operations (/v1/workflows)
+    WORKFLOW_START = "workflow_start"
+    WORKFLOW_VIEW = "workflow_view"
+    WORKFLOW_APPROVE = "workflow_approve"
+    WORKFLOW_CANCEL = "workflow_cancel"
+
 
 class AccessRule(ConfigurationBase):
     """Rule defining what actions a role can perform."""
@@ -3111,6 +3120,76 @@ and validates ``config`` against the matching model.
 """
 
 
+class WorkflowEngineConfiguration(ConfigurationBase):
+    """Workflow engine configuration.
+
+    Attributes:
+        enabled: Whether the workflow engine is active.
+        max_concurrent_workflows: Maximum simultaneous workflow executions.
+        transcript_retention_days: Days to retain step transcripts.
+    """
+
+    enabled: bool = Field(
+        False,
+        title="Enable workflow engine",
+        description="Whether the /v1/workflows endpoints are active.",
+    )
+
+    max_concurrent_workflows: PositiveInt = Field(
+        10,
+        title="Max concurrent workflows",
+        description="Maximum number of simultaneously running workflows.",
+    )
+
+    transcript_retention_days: PositiveInt = Field(
+        30,
+        title="Transcript retention days",
+        description="Days to retain step execution transcripts.",
+    )
+
+
+class SpawnerConfiguration(ConfigurationBase):
+    """Ephemeral agent spawner configuration.
+
+    Attributes:
+        type: Spawner backend type.
+        sandbox_image: Default container image for sandbox pods.
+        max_pods: Maximum concurrent sandbox pods.
+        namespace: Kubernetes namespace for sandbox pods.
+        service_account: Default K8s service account for sandbox pods.
+    """
+
+    type: Literal["kubernetes", "podman"] = Field(
+        ...,
+        title="Spawner type",
+        description="Backend for spawning ephemeral agent containers.",
+    )
+
+    sandbox_image: str = Field(
+        "lightspeed-agentic-sandbox:latest",
+        title="Default sandbox image",
+        description="Default container image for sandbox pods.",
+    )
+
+    max_pods: PositiveInt = Field(
+        10,
+        title="Max concurrent pods",
+        description="Maximum number of concurrent sandbox pods.",
+    )
+
+    namespace: Optional[str] = Field(
+        None,
+        title="Kubernetes namespace",
+        description="K8s namespace for sandbox pods (kubernetes spawner only).",
+    )
+
+    service_account: Optional[str] = Field(
+        None,
+        title="Service account",
+        description="Default K8s service account for sandbox pods.",
+    )
+
+
 class Configuration(ConfigurationBase):
     """Global service configuration."""
 
@@ -3319,6 +3398,38 @@ class Configuration(ConfigurationBase):
         "'name', a 'provider_id' ('question_validity' or 'redaction'), "
         "and a type-specific 'config'.",
     )
+
+    workflow_engine: WorkflowEngineConfiguration = Field(
+        default_factory=WorkflowEngineConfiguration,
+        title="Workflow engine configuration",
+        description="Configuration for multi-step workflow orchestration.",
+    )
+
+    spawner: Optional[SpawnerConfiguration] = Field(
+        None,
+        title="Spawner configuration",
+        description="Ephemeral agent spawner for sandbox container execution. "
+        "Required when any agent uses spawn=ephemeral.",
+    )
+
+    @model_validator(mode="after")
+    def validate_workflow_engine_requires_postgres(self) -> Self:
+        """Reject workflow engine when no PostgreSQL database is configured.
+
+        Returns:
+            Self: The model instance after validation.
+
+        Raises:
+            ValueError: If workflow engine is enabled without PostgreSQL.
+        """
+        wf_enabled = self.workflow_engine.enabled  # pylint: disable=no-member
+        has_postgres = self.database.postgres  # pylint: disable=no-member
+        if wf_enabled and not has_postgres:
+            raise ValueError(
+                "workflow_engine.enabled=true requires a PostgreSQL database. "
+                "Workflow state storage uses JSONB and is not supported with SQLite."
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_shield_names_unique(self) -> Self:

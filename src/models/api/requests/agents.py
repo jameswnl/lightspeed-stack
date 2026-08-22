@@ -1,0 +1,121 @@
+"""Request models for agent and workflow endpoints."""
+
+from typing import Any, Literal, Optional
+
+from pydantic import BaseModel, Field
+
+
+class AgentRunRequest(BaseModel):
+    """Request body for POST /v1/agents/run.
+
+    All agent parameters are passed inline — no registry lookup.
+
+    Attributes:
+        prompt: The task prompt for the agent.
+        instructions: System prompt / instructions.
+        model: Full model ID (e.g. "openai/gpt-4o").
+        provider: Provider name (used with model if no slash in model).
+        spawn: Execution mode.
+        sandbox_image: Container image for spawn=ephemeral.
+        tools: Tool definitions.
+        mcp_servers: MCP server names.
+        output_schema: JSON Schema for structured output.
+        context: Prior context (e.g. from previous steps).
+    """
+
+    prompt: str = Field(
+        ...,
+        description="The task prompt for the agent.",
+    )
+
+    instructions: Optional[str] = Field(
+        None,
+        description="System prompt / instructions for the agent.",
+    )
+
+    model: Optional[str] = Field(
+        None,
+        description="Full model ID (e.g. 'openai/gpt-4o'). "
+        "Falls back to inference.default_model.",
+    )
+
+    provider: Optional[str] = Field(
+        None,
+        description="Provider name. Used to prefix model if no slash present.",
+    )
+
+    spawn: Literal["none", "ephemeral"] = Field(
+        "none",
+        description="'none' runs in-process; 'ephemeral' spawns a container.",
+    )
+
+    sandbox_image: Optional[str] = Field(
+        None,
+        description="Container image for spawn=ephemeral.",
+    )
+
+    output_schema: Optional[dict[str, Any]] = Field(
+        None,
+        description="JSON Schema for structured output.",
+    )
+
+    context: Optional[dict[str, Any]] = Field(
+        None,
+        description="Prior context from previous steps or calls.",
+    )
+
+
+class RunWorkflowRequest(BaseModel):
+    """Request body for POST /v1/workflows/run.
+
+    Attributes:
+        definition: Workflow definition (same schema as cloud-agents YAML).
+        provider: Default LLM provider config for all steps.
+        sandbox_image: Default sandbox image for ephemeral steps.
+        approval_policy: Optional approval policy.
+    """
+
+    definition: dict[str, Any] = Field(
+        ...,
+        description="Workflow definition with apiVersion, kind, metadata, spec.",
+    )
+
+    provider: Optional[dict[str, Any]] = Field(
+        None,
+        description="Default provider config: {name, model, credentials_secret}.",
+    )
+
+    sandbox_image: Optional[str] = Field(
+        None,
+        description="Default sandbox image for ephemeral steps.",
+    )
+
+    approval_policy: Optional[dict[str, Any]] = Field(
+        None,
+        description="Approval policy for human-approval steps.",
+    )
+
+
+class ApproveWorkflowRequest(BaseModel):
+    """Request body for POST /v1/workflows/{id}/approve.
+
+    Attributes:
+        step_name: Name of the approval step.
+        decision: Approval decision.
+        approver: Identity of the approver.
+    """
+
+    step_name: str = Field(
+        ...,
+        description="Name of the approval step to approve.",
+    )
+
+    decision: Literal["approved", "rejected"] = Field(
+        ...,
+        description="Approval decision.",
+    )
+
+    approver: str = Field(
+        "",
+        description="Identity of the approver.",
+    )

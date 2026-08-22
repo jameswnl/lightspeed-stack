@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.endpoints import (
     # A2A (Agent-to-Agent) protocol support
     a2a,
+    agents,
     authorized,
     config,
     conversations_v1,
@@ -32,6 +33,7 @@ from app.endpoints import (
     streaming_query,
     tools,
     vector_stores,
+    workflows,
 )
 
 
@@ -78,6 +80,10 @@ def include_routers(app: FastAPI) -> None:
     app.include_router(health.router)
     app.include_router(authorized.router)
     app.include_router(metrics.router)
+
+    # Agent execution and workflow orchestration
+    app.include_router(agents.router, prefix="/v1")
+    app.include_router(workflows.router, prefix="/v1")
 
     # A2A (Agent-to-Agent) protocol endpoint
     app.include_router(a2a.router)

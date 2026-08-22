@@ -39,6 +39,7 @@ service_name = configuration.configuration.name
 # Global OpenAPI tags so every operation tag is declared (Spectral: operation-tag-defined).
 _OPENAPI_TAGS: Final[list[dict[str, str]]] = [
     {"name": "a2a", "description": "Agent-to-Agent (A2A) protocol."},
+    {"name": "agents", "description": "Agent execution."},
     {"name": "authorized", "description": "Authorization probe."},
     {"name": "config", "description": "Service configuration."},
     {"name": "conversations_v1", "description": "Conversations API v1."},
@@ -67,12 +68,15 @@ _OPENAPI_TAGS: Final[list[dict[str, str]]] = [
     {"name": "streaming_query_interrupt", "description": "Streaming interrupt."},
     {"name": "tools", "description": "Tools."},
     {"name": "vector-stores", "description": "Vector stores and files."},
+    {"name": "workflows", "description": "Multi-step workflow orchestration."},
 ]
 
 
 # running on FastAPI startup
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(  # pylint: disable=too-many-branches,too-many-statements,import-outside-toplevel
+    _app: FastAPI,
+) -> AsyncIterator[None]:
     """
     Initialize app resources.
 
@@ -135,11 +139,24 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     initialize_database()
     create_tables()
 
+    if configuration.workflow_engine_configuration.enabled:
+        pg_config = configuration.database_configuration.postgres
+        wf_config = configuration.workflow_engine_configuration
+        if pg_config:
+            from workflow.storage import WorkflowStorageFactory
+
+            await WorkflowStorageFactory.initialize(pg_config, wf_config)
+            logger.info("Workflow engine initialized")
+
     yield
 
     # Cleanup resources on shutdown
     try:
         await shutdown_background_topic_summary_tasks()
+        if configuration.workflow_engine_configuration.enabled:
+            from workflow.storage import WorkflowStorageFactory
+
+            await WorkflowStorageFactory.cleanup()
         await A2AStorageFactory.cleanup()
     finally:
         # Flush pending Sentry events after cleanup so any errors during

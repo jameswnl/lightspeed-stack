@@ -1,5 +1,10 @@
 """Concrete REST API request models grouped by domain."""
 
+from models.api.requests.agents import (
+    AgentRunRequest,
+    ApproveWorkflowRequest,
+    RunWorkflowRequest,
+)
 from models.api.requests.catalog import ModelFilter
 from models.api.requests.conversations import ConversationUpdateRequest
 from models.api.requests.feedback import FeedbackRequest, FeedbackStatusUpdateRequest
@@ -23,6 +28,8 @@ from models.api.requests.vector_stores import (
 )
 
 __all__ = [
+    "AgentRunRequest",
+    "ApproveWorkflowRequest",
     "ConversationUpdateRequest",
     "FeedbackRequest",
     "FeedbackStatusUpdateRequest",
@@ -38,6 +45,7 @@ __all__ = [
     "RlsapiV1InferRequest",
     "RlsapiV1SystemInfo",
     "RlsapiV1Terminal",
+    "RunWorkflowRequest",
     "SavedPromptCreateRequest",
     "StreamingInterruptRequest",
     "VectorStoreCreateRequest",

@@ -73,27 +73,32 @@ class TestRunAgentHandler:
         assert result["token_usage"]["input_tokens"] == 50
 
     @pytest.mark.asyncio
-    async def test_uses_default_model(
+    async def test_passes_provider_and_model(
         self,
         mocker: MockerFixture,
         mock_config: Any,
         mock_executor: Any,
     ) -> None:
-        """Falls back to default model when not specified."""
+        """Provider and model are passed through to step input."""
         mocker.patch("app.endpoints.agents.check_configuration_loaded")
         mocker.patch(
             "app.endpoints.agents.get_step_executor",
             return_value=mock_executor,
         )
 
-        body = AgentRunRequest(prompt="Hello")
+        body = AgentRunRequest(
+            prompt="Hello",
+            provider="openai",
+            model="gpt-4o-mini",
+        )
         auth = ("user-1", "testuser", False, "token")
         request = mocker.MagicMock()
 
         await run_agent_handler.__wrapped__(request, body, auth)
 
         call_args = mock_executor.run.call_args[0][0]
-        assert "gpt-4o" in call_args.provider.get("model", "")
+        assert call_args.provider["name"] == "openai"
+        assert call_args.provider["model"] == "gpt-4o-mini"
 
     @pytest.mark.asyncio
     async def test_ephemeral_without_spawner_raises(

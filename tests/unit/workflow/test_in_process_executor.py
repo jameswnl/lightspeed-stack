@@ -20,10 +20,9 @@ from workflow.step.in_process import InProcessStepExecutor, _extract_transcript
 
 
 @pytest.fixture(name="executor")
-def executor_fixture(mocker: MockerFixture) -> InProcessStepExecutor:
-    """Create an InProcessStepExecutor with a mocked client."""
-    mock_client = mocker.AsyncMock()
-    return InProcessStepExecutor(client=mock_client)
+def executor_fixture() -> InProcessStepExecutor:
+    """Create an InProcessStepExecutor."""
+    return InProcessStepExecutor()
 
 
 def _make_step_input(mocker: MockerFixture, **overrides: Any) -> Any:
@@ -32,7 +31,7 @@ def _make_step_input(mocker: MockerFixture, **overrides: Any) -> Any:
     step_input.step_name = overrides.get("step_name", "test-step")
     step_input.prompt = overrides.get("prompt", "Analyze the cluster")
     step_input.provider = overrides.get(
-        "provider", {"name": "openai", "model": "gpt-4o"}
+        "provider", {"name": "openai", "model": "gpt-4o-mini"}
     )
     step_input.system_prompt = overrides.get("system_prompt", None)
     step_input.output_schema = overrides.get("output_schema", None)
@@ -110,18 +109,16 @@ class TestInProcessStepExecutor:
         mock_run_result.output = "Analysis: cluster is healthy"
         mock_run_result.new_messages.return_value = []
         mock_run_result.usage = mocker.MagicMock()
-        mock_run_result.usage.total_tokens = 100
+        mock_run_result.usage.input_tokens = 100
         mock_run_result.usage.output_tokens = 50
 
         mock_agent = mocker.AsyncMock()
         mock_agent.run.return_value = mock_run_result
 
-        mocker.patch("workflow.step.in_process.prepare_workflow_step_params")
         mocker.patch(
-            "workflow.step.in_process.build_agent",
+            "workflow.step.in_process.Agent",
             return_value=mock_agent,
         )
-        mocker.patch("workflow.step.in_process.configuration")
 
         step_input = _make_step_input(mocker)
         result = await executor.run(step_input)
@@ -137,12 +134,10 @@ class TestInProcessStepExecutor:
         executor: InProcessStepExecutor,
     ) -> None:
         """Agent exception returns failed StepResult."""
-        mocker.patch("workflow.step.in_process.prepare_workflow_step_params")
         mocker.patch(
-            "workflow.step.in_process.build_agent",
+            "workflow.step.in_process.Agent",
             side_effect=RuntimeError("LLM connection failed"),
         )
-        mocker.patch("workflow.step.in_process.configuration")
 
         step_input = _make_step_input(mocker)
         result = await executor.run(step_input)
@@ -161,18 +156,16 @@ class TestInProcessStepExecutor:
         mock_run_result.output = '{"severity": "high", "count": 3}'
         mock_run_result.new_messages.return_value = []
         mock_run_result.usage = mocker.MagicMock()
-        mock_run_result.usage.total_tokens = 80
+        mock_run_result.usage.input_tokens = 80
         mock_run_result.usage.output_tokens = 30
 
         mock_agent = mocker.AsyncMock()
         mock_agent.run.return_value = mock_run_result
 
-        mocker.patch("workflow.step.in_process.prepare_workflow_step_params")
         mocker.patch(
-            "workflow.step.in_process.build_agent",
+            "workflow.step.in_process.Agent",
             return_value=mock_agent,
         )
-        mocker.patch("workflow.step.in_process.configuration")
 
         step_input = _make_step_input(
             mocker,
@@ -184,30 +177,26 @@ class TestInProcessStepExecutor:
         assert result.output == {"severity": "high", "count": 3}
 
     @pytest.mark.asyncio
-    async def test_model_resolution_with_provider(
+    async def test_model_resolution(
         self,
         mocker: MockerFixture,
         executor: InProcessStepExecutor,
     ) -> None:
-        """Model ID is prefixed with provider when no slash present."""
+        """Model string is built as provider:model for pydantic-ai."""
         mock_run_result = mocker.MagicMock()
         mock_run_result.output = "done"
         mock_run_result.new_messages.return_value = []
         mock_run_result.usage = mocker.MagicMock()
-        mock_run_result.usage.total_tokens = 10
+        mock_run_result.usage.input_tokens = 10
         mock_run_result.usage.output_tokens = 5
 
         mock_agent = mocker.AsyncMock()
         mock_agent.run.return_value = mock_run_result
 
-        mock_prepare = mocker.patch(
-            "workflow.step.in_process.prepare_workflow_step_params"
-        )
-        mocker.patch(
-            "workflow.step.in_process.build_agent",
+        mock_agent_cls = mocker.patch(
+            "workflow.step.in_process.Agent",
             return_value=mock_agent,
         )
-        mocker.patch("workflow.step.in_process.configuration")
 
         step_input = _make_step_input(
             mocker,
@@ -215,5 +204,4 @@ class TestInProcessStepExecutor:
         )
         await executor.run(step_input)
 
-        call_kwargs = mock_prepare.call_args[1]
-        assert call_kwargs["model"] == "openai/gpt-4o"
+        mock_agent_cls.assert_called_once_with("openai:gpt-4o", instructions="")

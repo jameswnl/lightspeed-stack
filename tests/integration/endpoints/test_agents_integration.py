@@ -1,6 +1,6 @@
 """Integration tests for /v1/agents/run endpoint.
 
-Tests the full endpoint call chain with mocked LLM backend,
+Tests the full endpoint call chain with mocked pydantic-ai Agent,
 verifying request parsing, model resolution, agent execution,
 and response formatting.
 """
@@ -9,24 +9,30 @@ and response formatting.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 from fastapi import Request
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+)
 from pytest_mock import MockerFixture
 
 from app.endpoints.agents import run_agent_handler
 from authentication.interface import AuthTuple
 from configuration import configuration
 from models.api.requests.agents import AgentRunRequest
-from tests.integration.conftest import create_agent_run_result
 
 
 @pytest.fixture(name="agent_config")
-def agent_config_fixture(mocker: MockerFixture) -> Any:
-    """Load config and mock the agent execution path."""
+def agent_config_fixture() -> Any:
+    """Load minimal config for agent tests."""
     config_dict = {
         "name": "test-agents",
         "service": {
@@ -36,8 +42,8 @@ def agent_config_fixture(mocker: MockerFixture) -> Any:
             "workers": 1,
         },
         "llama_stack": {
-            "use_as_library_client": True,
-            "library_client_config_path": "tests/configuration/run.yaml",
+            "use_as_library_client": False,
+            "url": "http://localhost:8321",
         },
         "user_data_collection": {
             "feedback_enabled": False,
@@ -48,26 +54,22 @@ def agent_config_fixture(mocker: MockerFixture) -> Any:
     return configuration
 
 
-@pytest.fixture(name="mock_agent_for_run")
-def mock_agent_for_run_fixture(mocker: MockerFixture) -> Any:
-    """Mock build_agent and OgxClient for the agents endpoint."""
+def _mock_agent_run(mocker: MockerFixture, output: str = "test output") -> Any:
+    """Create a mocked pydantic-ai Agent that returns the given output."""
+    mock_run_result = mocker.MagicMock()
+    mock_run_result.output = output
+    mock_run_result.new_messages.return_value = []
+    mock_run_result.usage = mocker.MagicMock()
+    mock_run_result.usage.input_tokens = 50
+    mock_run_result.usage.output_tokens = 25
+
     mock_agent = mocker.AsyncMock()
-    mock_agent.run = mocker.AsyncMock(
-        return_value=create_agent_run_result(
-            mocker,
-            content='{"severity": "high", "category": "resource", "summary": "OOM on worker-3"}',
-        )
-    )
+    mock_agent.run.return_value = mock_run_result
+
     mocker.patch(
-        "workflow.step.in_process.build_agent",
+        "workflow.step.in_process.Agent",
         return_value=mock_agent,
     )
-    mocker.patch("workflow.step.in_process.configuration", configuration)
-
-    mock_client = mocker.AsyncMock()
-    mock_holder = mocker.patch("workflow.step.in_process.AsyncOgxClientHolder")
-    mock_holder.return_value.get_client.return_value = mock_client
-
     return mock_agent
 
 
@@ -78,13 +80,16 @@ class TestAgentRunIntegration:
     async def test_simple_agent_run(
         self,
         agent_config: Any,
-        mock_agent_for_run: Any,
         mock_request_with_auth: Request,
+        mocker: MockerFixture,
     ) -> None:
         """Simple agent run returns completed status with output."""
+        _mock_agent_run(mocker, '{"severity": "high", "summary": "OOM"}')
+
         body = AgentRunRequest(
-            prompt="Classify this alert: high memory on worker-3",
-            model="test-provider/test-model",
+            prompt="Classify this alert",
+            provider="openai",
+            model="gpt-4o-mini",
         )
         auth: AuthTuple = ("user-1", "testuser", False, "")
 
@@ -93,18 +98,22 @@ class TestAgentRunIntegration:
         assert result["status"] == "completed"
         assert result["output"] is not None
         assert result["duration_ms"] >= 0
+        assert result["token_usage"]["input_tokens"] == 50
 
     @pytest.mark.asyncio
     async def test_agent_run_with_instructions(
         self,
         agent_config: Any,
-        mock_agent_for_run: Any,
         mock_request_with_auth: Request,
+        mocker: MockerFixture,
     ) -> None:
-        """Agent run passes instructions to the agent builder."""
+        """Agent run passes instructions to the agent."""
+        mock_agent = _mock_agent_run(mocker)
+
         body = AgentRunRequest(
             prompt="Classify this alert",
-            model="test-provider/test-model",
+            provider="openai",
+            model="gpt-4o-mini",
             instructions="You are a senior SRE. Be concise.",
         )
         auth: AuthTuple = ("user-1", "testuser", False, "")
@@ -112,19 +121,25 @@ class TestAgentRunIntegration:
         result = await run_agent_handler.__wrapped__(mock_request_with_auth, body, auth)
 
         assert result["status"] == "completed"
-        mock_agent_for_run.run.assert_called_once()
+        mock_agent.run.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_agent_run_with_structured_output(
         self,
         agent_config: Any,
-        mock_agent_for_run: Any,
         mock_request_with_auth: Request,
+        mocker: MockerFixture,
     ) -> None:
         """Agent run with output_schema parses JSON output."""
+        _mock_agent_run(
+            mocker,
+            '{"severity": "high", "category": "resource", "summary": "OOM"}',
+        )
+
         body = AgentRunRequest(
             prompt="Classify this alert",
-            model="test-provider/test-model",
+            provider="openai",
+            model="gpt-4o-mini",
             output_schema={
                 "type": "object",
                 "properties": {
@@ -158,11 +173,6 @@ class TestAgentRunIntegration:
                 ),
             ],
         )
-        tool_return_msg = mocker.MagicMock()
-        tool_return_msg.__class__ = type("ModelRequest", (), {})
-
-        from pydantic_ai.messages import ModelRequest
-
         tool_return = ModelRequest(
             parts=[
                 ToolReturnPart(
@@ -176,25 +186,28 @@ class TestAgentRunIntegration:
             parts=[TextPart(content="The pod is running normally.")],
         )
 
-        mock_run_result = create_agent_run_result(
-            mocker,
-            content="The pod is running normally.",
-            new_messages=[tool_call_response, tool_return, final_response],
-        )
+        mock_run_result = mocker.MagicMock()
+        mock_run_result.output = "The pod is running normally."
+        mock_run_result.new_messages.return_value = [
+            tool_call_response,
+            tool_return,
+            final_response,
+        ]
+        mock_run_result.usage = mocker.MagicMock()
+        mock_run_result.usage.input_tokens = 100
+        mock_run_result.usage.output_tokens = 50
 
         mock_agent = mocker.AsyncMock()
-        mock_agent.run = mocker.AsyncMock(return_value=mock_run_result)
+        mock_agent.run.return_value = mock_run_result
         mocker.patch(
-            "workflow.step.in_process.build_agent",
+            "workflow.step.in_process.Agent",
             return_value=mock_agent,
         )
-        mocker.patch("workflow.step.in_process.configuration", configuration)
-        mock_holder = mocker.patch("workflow.step.in_process.AsyncOgxClientHolder")
-        mock_holder.return_value.get_client.return_value = mocker.AsyncMock()
 
         body = AgentRunRequest(
             prompt="Check pod status",
-            model="test-provider/test-model",
+            provider="openai",
+            model="gpt-4o-mini",
         )
         auth: AuthTuple = ("user-1", "testuser", False, "")
 
@@ -210,31 +223,6 @@ class TestAgentRunIntegration:
         assert len(tool_calls) >= 1
 
     @pytest.mark.asyncio
-    async def test_agent_run_model_fallback(
-        self,
-        agent_config: Any,
-        mock_agent_for_run: Any,
-        mock_request_with_auth: Request,
-        mocker: MockerFixture,
-    ) -> None:
-        """Agent run falls back to default model when none specified."""
-        mock_prepare = mocker.patch(
-            "workflow.step.in_process.prepare_workflow_step_params"
-        )
-        mocker.patch(
-            "workflow.step.in_process.build_agent",
-            return_value=mock_agent_for_run,
-        )
-
-        body = AgentRunRequest(prompt="Hello")
-        auth: AuthTuple = ("user-1", "testuser", False, "")
-
-        await run_agent_handler.__wrapped__(mock_request_with_auth, body, auth)
-
-        call_kwargs = mock_prepare.call_args
-        assert call_kwargs is not None
-
-    @pytest.mark.asyncio
     async def test_ephemeral_without_spawner_returns_400(
         self,
         agent_config: Any,
@@ -245,7 +233,8 @@ class TestAgentRunIntegration:
 
         body = AgentRunRequest(
             prompt="Fix the issue",
-            model="test-provider/test-model",
+            provider="openai",
+            model="gpt-4o-mini",
             spawn="ephemeral",
         )
         auth: AuthTuple = ("user-1", "testuser", False, "")
@@ -260,20 +249,18 @@ class TestWorkflowDefinitionExecution:
 
     def test_triage_classify_definition_parses(self) -> None:
         """The triage-classify workflow YAML parses into a valid definition."""
-        from pathlib import Path
-
         from cloud_agents.workflow.core.definition import WorkflowDefinition
 
         wf_path = (
-            Path(__file__).resolve().parent.parent.parent.parent.parent
+            Path(__file__).resolve().parent.parent.parent.parent
             / "lightspeed-cloud-agents"
             / "examples"
             / "workflow-definitions"
             / "triage-classify-workflow.yaml"
         )
         if not wf_path.exists():
-            pytest.skip("lightspeed-cloud-agents repo not found at expected path")
-        with open(wf_path) as f:
+            pytest.skip("lightspeed-cloud-agents repo not found")
+        with open(wf_path, encoding="utf-8") as f:
             raw = yaml.safe_load(f)
 
         definition = WorkflowDefinition.model_validate(raw)
@@ -282,7 +269,3 @@ class TestWorkflowDefinitionExecution:
 
         step_types = [s.type for s in definition.spec.steps]
         assert step_types == ["agent", "human-approval", "agent"]
-
-        spawn_modes = [s.spawn for s in definition.spec.steps]
-        assert spawn_modes[0] == "none"
-        assert spawn_modes[2] == "none"

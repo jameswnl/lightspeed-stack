@@ -53,16 +53,8 @@ async def run_agent_handler(
 
     check_configuration_loaded(configuration)
 
-    model = body.model or ""
-    if body.provider and "/" not in model:
-        model = f"{body.provider}/{model}"
-    if not model:
-        inference = configuration.inference
-        default_model = inference.default_model or ""
-        default_provider = inference.default_provider or ""
-        model = (
-            f"{default_provider}/{default_model}" if default_provider else default_model
-        )
+    provider_name = body.provider or ""
+    model_name = body.model or ""
 
     step_def = {
         "name": "agent-run",
@@ -85,7 +77,7 @@ async def run_agent_handler(
 
     step_input = StepInput(
         prompt=body.prompt,
-        provider={"name": body.provider or "", "model": model},
+        provider={"name": provider_name, "model": model_name},
         system_prompt=body.instructions,
         output_schema=body.output_schema,
         context=body.context or {},

@@ -1,8 +1,8 @@
-"""In-process step executor using lightspeed-stack's pydantic-ai agent.
+"""In-process step executor using pydantic-ai directly.
 
 Implements cloud-agents' StepExecutor ABC for spawn=none mode.
-Wraps build_agent() and agent.run() to execute workflow steps
-in-process without spawning a container.
+Creates a pydantic-ai Agent and runs it in-process — no Llama Stack
+dependency, no container spawning.
 """
 
 # pylint: disable=import-outside-toplevel,too-few-public-methods
@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import time
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from cloud_agents.workflow.core.models import (
     TranscriptEvent,
@@ -22,13 +22,9 @@ from cloud_agents.workflow.executor.step.base import (
     StepInput,
     StepResult,
 )
-from ogx_client import AsyncOgxClient
+from pydantic_ai import Agent
 
-from client import AsyncOgxClientHolder
-from configuration import configuration
 from log import get_logger
-from utils.pydantic_ai_helpers import build_agent
-from workflow.utils import prepare_workflow_step_params
 
 logger = get_logger(__name__)
 
@@ -122,51 +118,26 @@ def _extract_response_events(message: Any, ts: str) -> list[TranscriptEvent]:
 
 
 class InProcessStepExecutor(StepExecutor):
-    """Execute workflow steps in-process using pydantic-ai.
+    """Execute workflow steps in-process using pydantic-ai directly.
 
-    Uses lightspeed-stack's build_agent() to construct an agent and
-    runs it synchronously (agent.run). Results are mapped to
-    cloud-agents' StepResult format with transcript capture.
-
-    Attributes:
-        _client: Llama Stack client for agent execution.
+    Creates a pydantic-ai Agent with the specified model and runs it.
+    No Llama Stack dependency — talks to LLM providers directly.
     """
 
-    def __init__(
-        self,
-        client: Optional[AsyncOgxClient] = None,
-    ) -> None:
-        """Initialize the in-process executor.
-
-        Parameters:
-            client: Llama Stack client. If None, uses the global singleton.
-        """
-        self._client = client
-
-    def _get_client(self) -> AsyncOgxClient:
-        """Get the Llama Stack client.
-
-        Returns:
-            The configured AsyncOgxClient.
-        """
-        if self._client is not None:
-            return self._client
-        return AsyncOgxClientHolder().get_client()
-
     def _resolve_model(self, step_input: StepInput) -> str:
-        """Resolve the full model ID from step input provider config.
+        """Resolve the pydantic-ai model string from step input.
 
         Parameters:
             step_input: Step input with provider configuration.
 
         Returns:
-            Model ID in "provider/model" format.
+            Model string for pydantic-ai (e.g. "openai:gpt-4o").
         """
-        model = step_input.provider.get("model", "")
         provider_name = step_input.provider.get("name", "")
-        if provider_name and "/" not in model:
-            return f"{provider_name}/{model}"
-        return model
+        model_name = step_input.provider.get("model", "")
+        if provider_name and model_name:
+            return f"{provider_name}:{model_name}"
+        return model_name or "openai:gpt-4o-mini"
 
     @staticmethod
     def _parse_output(output_text: str, has_schema: bool) -> dict[str, Any]:
@@ -202,19 +173,15 @@ class InProcessStepExecutor(StepExecutor):
         start_ms = int(time.monotonic() * 1000)
 
         try:
-            params = prepare_workflow_step_params(
-                model=self._resolve_model(step_input),
-                prompt=step_input.prompt,
-                instructions=step_input.system_prompt,
-            )
+            model_str = self._resolve_model(step_input)
+            agent = Agent(model_str, instructions=step_input.system_prompt or "")
 
-            agent = build_agent(self._get_client(), params, configuration)
             run_result = await agent.run(step_input.prompt)
 
             transcript_events = _extract_transcript(run_result)
             duration_ms = int(time.monotonic() * 1000) - start_ms
 
-            input_tokens = run_result.usage.total_tokens or 0 if run_result.usage else 0
+            input_tokens = run_result.usage.input_tokens or 0 if run_result.usage else 0
             output_tokens = (
                 run_result.usage.output_tokens or 0 if run_result.usage else 0
             )
@@ -242,7 +209,13 @@ class InProcessStepExecutor(StepExecutor):
                 duration_ms=duration_ms,
             )
 
-        except (RuntimeError, ValueError, TypeError, OSError, ConnectionError) as exc:
+        except (
+            RuntimeError,
+            ValueError,
+            TypeError,
+            OSError,
+            ConnectionError,
+        ) as exc:
             duration_ms = int(time.monotonic() * 1000) - start_ms
             logger.error(
                 "Step '%s' failed after %dms: %s",

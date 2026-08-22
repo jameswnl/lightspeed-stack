@@ -1,14 +1,16 @@
 """Unit tests for workflow engine and spawner configuration models."""
 
+# pylint: disable=no-member
+
 import pytest
 from pydantic import ValidationError
 
 from models.config import (
     CompactionConfiguration,
     Configuration,
+    DatabaseConfiguration,
     LlamaStackConfiguration,
     PostgreSQLDatabaseConfiguration,
-    DatabaseConfiguration,
     ServiceConfiguration,
     SpawnerConfiguration,
     UserDataCollection,

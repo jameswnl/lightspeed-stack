@@ -111,7 +111,7 @@ class TestInProcessStepExecutor:
         mock_run_result.new_messages.return_value = []
         mock_run_result.usage = mocker.MagicMock()
         mock_run_result.usage.total_tokens = 100
-        mock_run_result.usage.response_tokens = 50
+        mock_run_result.usage.output_tokens = 50
 
         mock_agent = mocker.AsyncMock()
         mock_agent.run.return_value = mock_run_result
@@ -162,7 +162,7 @@ class TestInProcessStepExecutor:
         mock_run_result.new_messages.return_value = []
         mock_run_result.usage = mocker.MagicMock()
         mock_run_result.usage.total_tokens = 80
-        mock_run_result.usage.response_tokens = 30
+        mock_run_result.usage.output_tokens = 30
 
         mock_agent = mocker.AsyncMock()
         mock_agent.run.return_value = mock_run_result
@@ -195,7 +195,7 @@ class TestInProcessStepExecutor:
         mock_run_result.new_messages.return_value = []
         mock_run_result.usage = mocker.MagicMock()
         mock_run_result.usage.total_tokens = 10
-        mock_run_result.usage.response_tokens = 5
+        mock_run_result.usage.output_tokens = 5
 
         mock_agent = mocker.AsyncMock()
         mock_agent.run.return_value = mock_run_result

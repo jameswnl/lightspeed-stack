@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any
 
 import pytest
@@ -21,7 +22,7 @@ from models.api.requests.agents import ApproveWorkflowRequest, RunWorkflowReques
 
 
 @pytest.fixture(autouse=True)
-def reset_executor():
+def reset_executor() -> Generator[None, None, None]:
     """Reset the module-level executor singleton."""
     import app.endpoints.workflows as wf_mod
 

@@ -2,6 +2,8 @@
 
 # pylint: disable=no-member
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -109,7 +111,7 @@ def test_spawner_configuration_rejects_unknown_field() -> None:
         SpawnerConfiguration(type="kubernetes", unknown=True)  # type: ignore[call-arg]
 
 
-def _make_config(**overrides):
+def _make_config(**overrides: Any) -> Configuration:
     """Create a minimal Configuration with optional overrides."""
     defaults = {
         "name": "test",

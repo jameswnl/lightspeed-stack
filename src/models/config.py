@@ -3400,7 +3400,11 @@ class Configuration(ConfigurationBase):
     )
 
     workflow_engine: WorkflowEngineConfiguration = Field(
-        default_factory=WorkflowEngineConfiguration,
+        default_factory=lambda: WorkflowEngineConfiguration(  # pylint: disable=unnecessary-lambda
+            enabled=False,
+            max_concurrent_workflows=10,
+            transcript_retention_days=30,
+        ),
         title="Workflow engine configuration",
         description="Configuration for multi-step workflow orchestration.",
     )

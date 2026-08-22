@@ -216,7 +216,7 @@ class InProcessStepExecutor(StepExecutor):
 
             input_tokens = run_result.usage.total_tokens or 0 if run_result.usage else 0
             output_tokens = (
-                run_result.usage.response_tokens or 0 if run_result.usage else 0
+                run_result.usage.output_tokens or 0 if run_result.usage else 0
             )
 
             output_text = (
@@ -236,13 +236,13 @@ class InProcessStepExecutor(StepExecutor):
             return StepResult(
                 status="completed",
                 output=output,
-                transcript=transcript_events,
+                transcript=[e.model_dump() for e in transcript_events],
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 duration_ms=duration_ms,
             )
 
-        except (RuntimeError, ValueError, TypeError, OSError) as exc:
+        except (RuntimeError, ValueError, TypeError, OSError, ConnectionError) as exc:
             duration_ms = int(time.monotonic() * 1000) - start_ms
             logger.error(
                 "Step '%s' failed after %dms: %s",

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any
 
 import pytest
@@ -13,7 +14,7 @@ from workflow.storage import WorkflowStorageFactory
 
 
 @pytest.fixture(autouse=True)
-def reset_factory():
+def reset_factory() -> Generator[None, None, None]:
     """Reset factory state before each test."""
     WorkflowStorageFactory.reset()
     yield

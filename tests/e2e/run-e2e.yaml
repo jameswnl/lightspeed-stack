@@ -1,0 +1,82 @@
+version: '2'
+distro_name: e2e-test-minimal
+
+apis:
+  - responses
+  - inference
+  - tool_runtime
+  - vector_io
+  - files
+
+container_image: null
+external_providers_dir: null
+logging: null
+providers:
+  responses:
+  - provider_id: builtin
+    provider_type: inline::builtin
+    config:
+      persistence:
+        responses:
+          table_name: agents_responses
+          backend: sql_default
+  inference:
+  - provider_id: openai
+    provider_type: remote::openai
+    config:
+      api_key: ${env.OPENAI_API_KEY}
+      allowed_models: ["gpt-4-turbo", "gpt-4o-mini"]
+  tool_runtime:
+  - provider_id: model-context-protocol
+    provider_type: remote::model-context-protocol
+    config: {}
+  vector_io:
+  - config:
+      persistence:
+        namespace: vector_io::faiss
+        backend: kv_default
+    provider_id: faiss
+    provider_type: inline::faiss
+  files:
+  - provider_id: builtin
+    provider_type: inline::localfs
+    config:
+      storage_dir: /tmp/e2e-test-files
+      metadata_store:
+        table_name: file_metadata
+        backend: sql_default
+server:
+  auth: null
+  host: null
+  port: 8321
+  quota: null
+  tls_cafile: null
+  tls_certfile: null
+  tls_keyfile: null
+storage:
+  backends:
+    kv_default:
+      type: kv_sqlite
+      db_path: ${env.KV_STORE_PATH:=/tmp/e2e-test-kv.db}
+    sql_default:
+      type: sql_sqlite
+      db_path: ${env.SQL_STORE_PATH:=/tmp/e2e-test-sql.db}
+  stores:
+    metadata:
+      namespace: registry
+      backend: kv_default
+    inference:
+      table_name: inference_store
+      backend: sql_default
+    conversations:
+      table_name: openai_conversations
+      backend: sql_default
+    prompts:
+      table_name: prompts
+      backend: sql_default
+    connectors:
+      table_name: connectors
+      backend: sql_default
+registered_resources:
+  models: []
+  vector_stores: []

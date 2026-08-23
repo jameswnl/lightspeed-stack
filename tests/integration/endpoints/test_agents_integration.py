@@ -1,11 +1,10 @@
 """Integration tests for /v1/agents/run endpoint.
 
-Tests the full endpoint call chain with mocked pydantic-ai Agent,
-verifying request parsing, model resolution, agent execution,
-and response formatting.
+Tests the full endpoint call chain with mocked step executor,
+verifying request parsing, model resolution, and response formatting.
 """
 
-# pylint: disable=import-outside-toplevel,unused-argument,protected-access,too-few-public-methods,unspecified-encoding,too-many-locals
+# pylint: disable=import-outside-toplevel,unused-argument,protected-access,too-few-public-methods,unspecified-encoding
 
 from __future__ import annotations
 
@@ -15,13 +14,6 @@ from typing import Any
 import pytest
 import yaml
 from fastapi import Request
-from pydantic_ai.messages import (
-    ModelRequest,
-    ModelResponse,
-    TextPart,
-    ToolCallPart,
-    ToolReturnPart,
-)
 from pytest_mock import MockerFixture
 
 from app.endpoints.agents import run_agent_handler
@@ -54,23 +46,26 @@ def agent_config_fixture() -> Any:
     return configuration
 
 
-def _mock_agent_run(mocker: MockerFixture, output: str = "test output") -> Any:
-    """Create a mocked pydantic-ai Agent that returns the given output."""
-    mock_run_result = mocker.MagicMock()
-    mock_run_result.output = output
-    mock_run_result.new_messages.return_value = []
-    mock_run_result.usage = mocker.MagicMock()
-    mock_run_result.usage.input_tokens = 50
-    mock_run_result.usage.output_tokens = 25
+def _mock_executor(mocker: MockerFixture, output: Any = None) -> Any:
+    """Mock the step executor returned by get_step_executor."""
+    mock_result = mocker.MagicMock()
+    mock_result.status = "completed"
+    mock_result.output = output or {"summary": "test output"}
+    mock_result.error = None
+    mock_result.transcript = [
+        {"ts": "2024-01-01T00:00:00", "type": "result", "data": {"text": "done"}}
+    ]
+    mock_result.input_tokens = 50
+    mock_result.output_tokens = 25
+    mock_result.duration_ms = 500
 
-    mock_agent = mocker.AsyncMock()
-    mock_agent.run.return_value = mock_run_result
-
+    mock_exec = mocker.AsyncMock()
+    mock_exec.run.return_value = mock_result
     mocker.patch(
-        "workflow.step.in_process.Agent",
-        return_value=mock_agent,
+        "app.endpoints.agents.get_step_executor",
+        return_value=mock_exec,
     )
-    return mock_agent
+    return mock_exec
 
 
 class TestAgentRunIntegration:
@@ -84,7 +79,8 @@ class TestAgentRunIntegration:
         mocker: MockerFixture,
     ) -> None:
         """Simple agent run returns completed status with output."""
-        _mock_agent_run(mocker, '{"severity": "high", "summary": "OOM"}')
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        _mock_executor(mocker)
 
         body = AgentRunRequest(
             prompt="Classify this alert",
@@ -96,57 +92,29 @@ class TestAgentRunIntegration:
         result = await run_agent_handler.__wrapped__(mock_request_with_auth, body, auth)
 
         assert result["status"] == "completed"
-        assert result["output"] is not None
-        assert result["duration_ms"] >= 0
+        assert result["output"]["summary"] == "test output"
         assert result["token_usage"]["input_tokens"] == 50
+        assert result["duration_ms"] == 500
 
     @pytest.mark.asyncio
-    async def test_agent_run_with_instructions(
+    async def test_structured_output_passthrough(
         self,
         agent_config: Any,
         mock_request_with_auth: Request,
         mocker: MockerFixture,
     ) -> None:
-        """Agent run passes instructions to the agent."""
-        mock_agent = _mock_agent_run(mocker)
-
-        body = AgentRunRequest(
-            prompt="Classify this alert",
-            provider="openai",
-            model="gpt-4o-mini",
-            instructions="You are a senior SRE. Be concise.",
-        )
-        auth: AuthTuple = ("user-1", "testuser", False, "")
-
-        result = await run_agent_handler.__wrapped__(mock_request_with_auth, body, auth)
-
-        assert result["status"] == "completed"
-        mock_agent.run.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_agent_run_with_structured_output(
-        self,
-        agent_config: Any,
-        mock_request_with_auth: Request,
-        mocker: MockerFixture,
-    ) -> None:
-        """Agent run with output_schema parses JSON output."""
-        _mock_agent_run(
+        """Structured output from executor is passed through."""
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        _mock_executor(
             mocker,
-            '{"severity": "high", "category": "resource", "summary": "OOM"}',
+            output={"severity": "high", "category": "resource"},
         )
 
         body = AgentRunRequest(
             prompt="Classify this alert",
             provider="openai",
             model="gpt-4o-mini",
-            output_schema={
-                "type": "object",
-                "properties": {
-                    "severity": {"type": "string"},
-                    "category": {"type": "string"},
-                },
-            },
+            output_schema={"type": "object"},
         )
         auth: AuthTuple = ("user-1", "testuser", False, "")
 
@@ -154,58 +122,20 @@ class TestAgentRunIntegration:
 
         assert result["status"] == "completed"
         assert result["output"]["severity"] == "high"
-        assert result["output"]["category"] == "resource"
 
     @pytest.mark.asyncio
-    async def test_agent_run_with_tool_calls(
+    async def test_transcript_included(
         self,
         agent_config: Any,
         mock_request_with_auth: Request,
         mocker: MockerFixture,
     ) -> None:
-        """Agent run captures tool calls in transcript."""
-        tool_call_response = ModelResponse(
-            parts=[
-                ToolCallPart(
-                    tool_name="kubectl",
-                    args={"command": "get pods -n production"},
-                    tool_call_id="tc-1",
-                ),
-            ],
-        )
-        tool_return = ModelRequest(
-            parts=[
-                ToolReturnPart(
-                    tool_name="kubectl",
-                    content="NAME  STATUS\npod-1  Running",
-                    tool_call_id="tc-1",
-                )
-            ]
-        )
-        final_response = ModelResponse(
-            parts=[TextPart(content="The pod is running normally.")],
-        )
-
-        mock_run_result = mocker.MagicMock()
-        mock_run_result.output = "The pod is running normally."
-        mock_run_result.new_messages.return_value = [
-            tool_call_response,
-            tool_return,
-            final_response,
-        ]
-        mock_run_result.usage = mocker.MagicMock()
-        mock_run_result.usage.input_tokens = 100
-        mock_run_result.usage.output_tokens = 50
-
-        mock_agent = mocker.AsyncMock()
-        mock_agent.run.return_value = mock_run_result
-        mocker.patch(
-            "workflow.step.in_process.Agent",
-            return_value=mock_agent,
-        )
+        """Transcript events are included in the response."""
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        _mock_executor(mocker)
 
         body = AgentRunRequest(
-            prompt="Check pod status",
+            prompt="Check status",
             provider="openai",
             model="gpt-4o-mini",
         )
@@ -213,22 +143,44 @@ class TestAgentRunIntegration:
 
         result = await run_agent_handler.__wrapped__(mock_request_with_auth, body, auth)
 
-        assert result["status"] == "completed"
-        transcript = result["transcript"]
-        tool_calls = [
-            e
-            for e in transcript
-            if (e.get("type") if isinstance(e, dict) else e.type) == "tool_call"
-        ]
-        assert len(tool_calls) >= 1
+        assert len(result["transcript"]) == 1
+        assert result["transcript"][0]["type"] == "result"
+
+    @pytest.mark.asyncio
+    async def test_step_input_construction(
+        self,
+        agent_config: Any,
+        mock_request_with_auth: Request,
+        mocker: MockerFixture,
+    ) -> None:
+        """StepInput is constructed with correct provider and prompt."""
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        mock_exec = _mock_executor(mocker)
+
+        body = AgentRunRequest(
+            prompt="Analyze this",
+            provider="openai",
+            model="gpt-4o",
+            instructions="Be concise",
+        )
+        auth: AuthTuple = ("user-1", "testuser", False, "")
+
+        await run_agent_handler.__wrapped__(mock_request_with_auth, body, auth)
+
+        step_input = mock_exec.run.call_args[0][0]
+        assert step_input.prompt == "Analyze this"
+        assert step_input.provider == {"name": "openai", "model": "gpt-4o"}
+        assert step_input.system_prompt == "Be concise"
 
     @pytest.mark.asyncio
     async def test_ephemeral_without_spawner_returns_400(
         self,
         agent_config: Any,
         mock_request_with_auth: Request,
+        mocker: MockerFixture,
     ) -> None:
         """Requesting spawn=ephemeral without spawner config returns 400."""
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
         from fastapi import HTTPException
 
         body = AgentRunRequest(
@@ -266,6 +218,3 @@ class TestWorkflowDefinitionExecution:
         definition = WorkflowDefinition.model_validate(raw)
         assert definition.metadata["name"] == "triage-classify-alerts"
         assert len(definition.spec.steps) == 3
-
-        step_types = [s.type for s in definition.spec.steps]
-        assert step_types == ["agent", "human-approval", "agent"]

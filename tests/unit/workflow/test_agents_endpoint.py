@@ -17,16 +17,13 @@ from models.api.requests.agents import AgentRunRequest
 def mock_config_fixture(mocker: MockerFixture) -> Any:
     """Mock the configuration singleton."""
     mock_cfg = mocker.patch("app.endpoints.agents.configuration")
-    mock_cfg.inference = mocker.MagicMock()
-    mock_cfg.inference.default_model = "gpt-4o"
-    mock_cfg.inference.default_provider = "openai"
     mock_cfg.spawner_configuration = None
     return mock_cfg
 
 
 @pytest.fixture(name="mock_executor")
 def mock_executor_fixture(mocker: MockerFixture) -> Any:
-    """Mock the step executor."""
+    """Mock the step executor via cloud-agents dispatch."""
     mock_result = mocker.MagicMock()
     mock_result.status = "completed"
     mock_result.output = {"summary": "Done"}
@@ -61,7 +58,8 @@ class TestRunAgentHandler:
 
         body = AgentRunRequest(
             prompt="Analyze the cluster",
-            model="openai/gpt-4o",
+            provider="openai",
+            model="gpt-4o-mini",
         )
         auth = ("user-1", "testuser", False, "token")
         request = mocker.MagicMock()
@@ -81,10 +79,6 @@ class TestRunAgentHandler:
     ) -> None:
         """Provider and model are passed through to step input."""
         mocker.patch("app.endpoints.agents.check_configuration_loaded")
-        mocker.patch(
-            "app.endpoints.agents.get_step_executor",
-            return_value=mock_executor,
-        )
 
         body = AgentRunRequest(
             prompt="Hello",

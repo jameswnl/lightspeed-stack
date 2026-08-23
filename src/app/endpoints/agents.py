@@ -4,6 +4,8 @@
 
 from typing import Annotated, Any
 
+from cloud_agents.workflow.executor.step.base import StepInput
+from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from authentication import get_auth_dependency
@@ -14,7 +16,6 @@ from log import get_logger
 from models.api.requests.agents import AgentRunRequest
 from models.config import Action
 from utils.endpoints import check_configuration_loaded
-from workflow.step.dispatch import get_step_executor
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["agents"])
@@ -53,9 +54,6 @@ async def run_agent_handler(
 
     check_configuration_loaded(configuration)
 
-    provider_name = body.provider or ""
-    model_name = body.model or ""
-
     step_def = {
         "name": "agent-run",
         "spawn": body.spawn,
@@ -63,21 +61,17 @@ async def run_agent_handler(
     }
 
     spawner_config = configuration.spawner_configuration
-    spawner = None
-    if body.spawn == "ephemeral":
-        if not spawner_config:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="spawn=ephemeral requires a spawner configuration.",
-            )
+    if body.spawn == "ephemeral" and not spawner_config:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="spawn=ephemeral requires a spawner configuration.",
+        )
 
-    executor = get_step_executor(step_def, spawner=spawner)
-
-    from cloud_agents.workflow.executor.step.base import StepInput
+    executor = get_step_executor(step_def, spawner=None)
 
     step_input = StepInput(
         prompt=body.prompt,
-        provider={"name": provider_name, "model": model_name},
+        provider={"name": body.provider or "", "model": body.model or ""},
         system_prompt=body.instructions,
         output_schema=body.output_schema,
         context=body.context or {},

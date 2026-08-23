@@ -67,6 +67,16 @@ class TestResolveMcpServers:
         result = resolve_mcp_servers()
         assert result == []
 
+    def test_unknown_server_raises(self, mocker: MockerFixture) -> None:
+        """Unknown server name raises ValueError."""
+        mock_server = mocker.MagicMock()
+        mock_server.name = "kubectl"
+        mock_config = mocker.patch("workflow.query_executor.configuration")
+        mock_config.mcp_servers = [mock_server]
+
+        with pytest.raises(ValueError, match="Unknown MCP server"):
+            resolve_mcp_servers(server_names=["nonexistent"])
+
 
 class TestExecuteQueryViaDirectExecutor:
     """Tests for execute_query_via_direct_executor."""
@@ -130,3 +140,29 @@ class TestExecuteQueryViaDirectExecutor:
         assert step_input.mcp_servers is not None
         assert len(step_input.mcp_servers) == 1
         assert step_input.mcp_servers[0]["name"] == "kubectl"
+
+    @pytest.mark.asyncio
+    async def test_missing_provider_and_model_raises(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Raises ValueError when no provider/model and no defaults."""
+        mock_config = mocker.patch("workflow.query_executor.configuration")
+        mock_config.mcp_servers = []
+        mock_config.inference = mocker.MagicMock()
+        mock_config.inference.default_provider = None
+        mock_config.inference.default_model = None
+
+        with pytest.raises(ValueError, match="Provider and model must be"):
+            await execute_query_via_direct_executor(prompt="Hello")
+
+    @pytest.mark.asyncio
+    async def test_prompt_too_long_raises(self, mocker: MockerFixture) -> None:
+        """Raises ValueError when prompt exceeds max length."""
+        mocker.patch("workflow.query_executor.configuration")
+
+        with pytest.raises(ValueError, match="exceeds maximum length"):
+            await execute_query_via_direct_executor(
+                prompt="x" * 200_000,
+                provider="openai",
+                model="gpt-4o-mini",
+            )

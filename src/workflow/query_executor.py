@@ -18,6 +18,11 @@ from log import get_logger
 
 logger = get_logger(__name__)
 
+_QUERY_STEP_DEF: dict[str, str] = {"name": "query", "spawn": "none"}
+
+MAX_PROMPT_LENGTH = 100_000
+MAX_INSTRUCTIONS_LENGTH = 50_000
+
 
 def resolve_mcp_servers(
     server_names: Optional[list[str]] = None,
@@ -34,7 +39,20 @@ def resolve_mcp_servers(
 
     Returns:
         List of MCP server config dicts.
+
+    Raises:
+        ValueError: If a requested server name is not configured.
     """
+    configured = {s.name: s for s in configuration.mcp_servers}
+
+    if server_names:
+        unknown = [n for n in server_names if n not in configured]
+        if unknown:
+            raise ValueError(
+                f"Unknown MCP server(s): {unknown}. "
+                f"Configured: {sorted(configured.keys())}"
+            )
+
     mcp_configs: list[dict[str, Any]] = []
     for server in configuration.mcp_servers:
         if server_names and server.name not in server_names:
@@ -58,6 +76,8 @@ async def execute_query_via_direct_executor(
     mcp_server_names: Optional[list[str]] = None,
     output_schema: Optional[dict[str, Any]] = None,
     context: Optional[dict[str, Any]] = None,
+    user_id: str = "",
+    username: str = "",
 ) -> StepResult:
     """Execute a query using cloud-agents' DirectExecutor.
 
@@ -73,16 +93,38 @@ async def execute_query_via_direct_executor(
         mcp_server_names: MCP server names to include (None = all).
         output_schema: Optional structured output schema.
         context: Prior conversation context.
+        user_id: User identifier for audit logging.
+        username: Username for audit logging.
 
     Returns:
         StepResult with agent response, transcript, and metrics.
+
+    Raises:
+        ValueError: If provider/model are not specified and no defaults
+            are configured, or if prompt exceeds length limits.
     """
+    if len(prompt) > MAX_PROMPT_LENGTH:
+        raise ValueError(
+            f"Prompt exceeds maximum length ({len(prompt)} > {MAX_PROMPT_LENGTH})"
+        )
+    if instructions and len(instructions) > MAX_INSTRUCTIONS_LENGTH:
+        raise ValueError(
+            f"Instructions exceed maximum length "
+            f"({len(instructions)} > {MAX_INSTRUCTIONS_LENGTH})"
+        )
+
     provider_name = provider or ""
     model_name = model or ""
     if not provider_name or not model_name:
         inference = configuration.inference
         provider_name = provider_name or inference.default_provider or ""
         model_name = model_name or inference.default_model or ""
+
+    if not provider_name or not model_name:
+        raise ValueError(
+            "Provider and model must be specified or configured as defaults "
+            "(inference.default_provider / inference.default_model)"
+        )
 
     mcp_servers = resolve_mcp_servers(mcp_server_names)
 
@@ -97,14 +139,25 @@ async def execute_query_via_direct_executor(
         output_key="response",
     )
 
-    step_def = {"name": "query", "spawn": "none"}
-    executor = get_step_executor(step_def, spawner=None)
+    executor = get_step_executor(_QUERY_STEP_DEF, spawner=None)
 
     logger.info(
-        "Executing query via DirectExecutor (model=%s:%s, mcp_servers=%d)",
+        "Query via DirectExecutor: user=%s model=%s:%s mcp_servers=%d",
+        username or user_id or "anonymous",
         provider_name,
         model_name,
         len(mcp_servers),
     )
 
-    return await executor.run(step_input)
+    result = await executor.run(step_input)
+
+    logger.info(
+        "Query completed: user=%s status=%s duration_ms=%d tokens_in=%d tokens_out=%d",
+        username or user_id or "anonymous",
+        result.status,
+        result.duration_ms,
+        result.input_tokens,
+        result.output_tokens,
+    )
+
+    return result

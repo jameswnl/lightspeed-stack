@@ -15,7 +15,8 @@ Differences from /query:
 
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
 
 from authentication import get_auth_dependency
 from authentication.interface import AuthTuple
@@ -30,33 +31,62 @@ logger = get_logger(__name__)
 router = APIRouter(tags=["query"])
 
 
+class QueryDirectRequest(BaseModel):
+    """Request body for POST /v1/query/direct.
+
+    Attributes:
+        prompt: The user's query text.
+        model: Model name (e.g. "gpt-4o-mini").
+        provider: Provider name (e.g. "openai").
+        instructions: System prompt / instructions.
+        mcp_servers: MCP server names to include from config.
+        output_schema: Optional JSON Schema for structured output.
+        context: Prior conversation context.
+    """
+
+    prompt: str = Field(
+        ...,
+        description="The user's query text.",
+    )
+
+    model: Optional[str] = Field(
+        None,
+        description="Model name (falls back to inference.default_model).",
+    )
+
+    provider: Optional[str] = Field(
+        None,
+        description="Provider name (falls back to inference.default_provider).",
+    )
+
+    instructions: Optional[str] = Field(
+        None,
+        description="System prompt / instructions for the agent.",
+    )
+
+    mcp_servers: Optional[list[str]] = Field(
+        None,
+        description="MCP server names from config (None = all configured).",
+    )
+
+    output_schema: Optional[dict[str, Any]] = Field(
+        None,
+        description="JSON Schema for structured output.",
+    )
+
+    context: Optional[dict[str, Any]] = Field(
+        None,
+        description="Prior conversation context.",
+    )
+
+
 query_direct_responses: dict[int | str, dict[str, Any]] = {
     200: {"description": "Query response via DirectExecutor."},
+    400: {"description": "Invalid request (unknown MCP server, missing model)."},
     401: {"description": "Unauthorized."},
     403: {"description": "Forbidden."},
     500: {"description": "Internal server error."},
 }
-
-
-class QueryDirectRequest:
-    """Query parameters extracted from the request body."""
-
-    def __init__(
-        self,
-        prompt: str,
-        model: Optional[str] = None,
-        provider: Optional[str] = None,
-        instructions: Optional[str] = None,
-        mcp_servers: Optional[list[str]] = None,
-        output_schema: Optional[dict[str, Any]] = None,
-    ):
-        """Initialize query request parameters."""
-        self.prompt = prompt
-        self.model = model
-        self.provider = provider
-        self.instructions = instructions
-        self.mcp_servers = mcp_servers
-        self.output_schema = output_schema
 
 
 @router.post(
@@ -66,7 +96,7 @@ class QueryDirectRequest:
 @authorize(Action.QUERY)
 async def query_direct_handler(
     request: Request,
-    body: dict[str, Any],
+    body: QueryDirectRequest,
     auth: Annotated[AuthTuple, Depends(get_auth_dependency())],
 ) -> dict[str, Any]:
     """Execute a query via DirectExecutor (no Llama Stack).
@@ -76,35 +106,45 @@ async def query_direct_handler(
     resolved from lightspeed-stack's configuration.
 
     Parameters:
-        request: FastAPI request (used by middleware).
-        body: Query parameters (prompt, model, provider, etc.).
-        auth: Authentication tuple (used by middleware).
+        request: FastAPI request (used by auth middleware).
+        body: Query parameters.
+        auth: Authentication tuple (used by auth decorator).
 
     Returns:
         Query response with output, transcript, and token usage.
     """
+    # request is consumed by the @authorize decorator
     _ = request
-    _ = auth
+
+    user_id, username, _, _ = auth
 
     check_configuration_loaded(configuration)
 
-    result = await execute_query_via_direct_executor(
-        prompt=body.get("prompt", ""),
-        model=body.get("model"),
-        provider=body.get("provider"),
-        instructions=body.get("instructions"),
-        mcp_server_names=body.get("mcp_servers"),
-        output_schema=body.get("output_schema"),
-        context=body.get("context"),
-    )
+    try:
+        result = await execute_query_via_direct_executor(
+            prompt=body.prompt,
+            model=body.model,
+            provider=body.provider,
+            instructions=body.instructions,
+            mcp_server_names=body.mcp_servers,
+            output_schema=body.output_schema,
+            context=body.context,
+            user_id=user_id,
+            username=username,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     return {
         "status": result.status,
-        "response": result.output.get("response", "") if result.output else "",
+        "response": (result.output.get("response", "") if result.output else ""),
         "output": result.output,
         "error": result.error,
         "transcript": (
-            [e if isinstance(e, dict) else e.model_dump() for e in result.transcript]
+            [e if isinstance(e, dict) else {} for e in result.transcript]
             if result.transcript
             else []
         ),

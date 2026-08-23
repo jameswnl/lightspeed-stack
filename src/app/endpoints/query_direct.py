@@ -143,10 +143,18 @@ async def query_direct_handler(
             detail=str(exc),
         ) from exc
 
+    output = result.output
+    response_text = ""
+    if isinstance(output, dict):
+        response_text = output.get("response", "")
+    elif output is not None:
+        response_text = str(output)
+        output = {"response": response_text}
+
     return {
         "status": result.status,
-        "response": (result.output.get("response", "") if result.output else ""),
-        "output": result.output,
+        "response": response_text,
+        "output": output,
         "error": result.error,
         "transcript": (
             [e if isinstance(e, dict) else {} for e in result.transcript]

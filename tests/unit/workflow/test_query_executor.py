@@ -1,0 +1,132 @@
+"""Unit tests for the query executor bridge."""
+
+# pylint: disable=protected-access
+
+from __future__ import annotations
+
+import pytest
+from pytest_mock import MockerFixture
+
+from workflow.query_executor import (
+    execute_query_via_direct_executor,
+    resolve_mcp_servers,
+)
+
+
+class TestResolveMcpServers:
+    """Tests for resolve_mcp_servers."""
+
+    def test_resolves_all_servers(self, mocker: MockerFixture) -> None:
+        """Resolves all configured MCP servers when no filter."""
+        mock_server1 = mocker.MagicMock()
+        mock_server1.name = "kubectl"
+        mock_server1.url = "http://mcp-kubectl:8080/sse"
+        mock_server1.resolved_authorization_headers = {}
+
+        mock_server2 = mocker.MagicMock()
+        mock_server2.name = "github"
+        mock_server2.url = "http://mcp-github:8080/sse"
+        mock_server2.resolved_authorization_headers = {
+            "Authorization": "Bearer token123"
+        }
+
+        mock_config = mocker.patch("workflow.query_executor.configuration")
+        mock_config.mcp_servers = [mock_server1, mock_server2]
+
+        result = resolve_mcp_servers()
+
+        assert len(result) == 2
+        assert result[0] == {"name": "kubectl", "url": "http://mcp-kubectl:8080/sse"}
+        assert result[1]["headers"]["Authorization"] == "Bearer token123"
+
+    def test_filters_by_name(self, mocker: MockerFixture) -> None:
+        """Only resolves named servers when filter is provided."""
+        mock_server1 = mocker.MagicMock()
+        mock_server1.name = "kubectl"
+        mock_server1.url = "http://mcp-kubectl:8080/sse"
+        mock_server1.resolved_authorization_headers = {}
+
+        mock_server2 = mocker.MagicMock()
+        mock_server2.name = "github"
+        mock_server2.url = "http://mcp-github:8080/sse"
+        mock_server2.resolved_authorization_headers = {}
+
+        mock_config = mocker.patch("workflow.query_executor.configuration")
+        mock_config.mcp_servers = [mock_server1, mock_server2]
+
+        result = resolve_mcp_servers(server_names=["kubectl"])
+
+        assert len(result) == 1
+        assert result[0]["name"] == "kubectl"
+
+    def test_empty_when_no_servers(self, mocker: MockerFixture) -> None:
+        """Returns empty list when no servers configured."""
+        mock_config = mocker.patch("workflow.query_executor.configuration")
+        mock_config.mcp_servers = []
+
+        result = resolve_mcp_servers()
+        assert result == []
+
+
+class TestExecuteQueryViaDirectExecutor:
+    """Tests for execute_query_via_direct_executor."""
+
+    @pytest.mark.asyncio
+    async def test_executes_with_provider(self, mocker: MockerFixture) -> None:
+        """Passes provider and model to executor."""
+        mock_result = mocker.MagicMock()
+        mock_result.status = "completed"
+        mock_result.output = {"response": "Done"}
+
+        mock_exec = mocker.AsyncMock()
+        mock_exec.run.return_value = mock_result
+        mocker.patch(
+            "workflow.query_executor.get_step_executor",
+            return_value=mock_exec,
+        )
+        mocker.patch("workflow.query_executor.configuration").mcp_servers = []
+
+        result = await execute_query_via_direct_executor(
+            prompt="Hello",
+            model="gpt-4o-mini",
+            provider="openai",
+        )
+
+        assert result.status == "completed"
+        step_input = mock_exec.run.call_args[0][0]
+        assert step_input.provider == {
+            "name": "openai",
+            "model": "gpt-4o-mini",
+        }
+
+    @pytest.mark.asyncio
+    async def test_includes_mcp_servers(self, mocker: MockerFixture) -> None:
+        """Resolves and passes MCP servers to executor."""
+        mock_result = mocker.MagicMock()
+        mock_result.status = "completed"
+
+        mock_exec = mocker.AsyncMock()
+        mock_exec.run.return_value = mock_result
+        mocker.patch(
+            "workflow.query_executor.get_step_executor",
+            return_value=mock_exec,
+        )
+
+        mock_server = mocker.MagicMock()
+        mock_server.name = "kubectl"
+        mock_server.url = "http://mcp:8080/sse"
+        mock_server.resolved_authorization_headers = {}
+        mocker.patch("workflow.query_executor.configuration").mcp_servers = [
+            mock_server
+        ]
+
+        await execute_query_via_direct_executor(
+            prompt="List pods",
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+
+        step_input = mock_exec.run.call_args[0][0]
+        assert step_input.mcp_servers is not None
+        assert len(step_input.mcp_servers) == 1
+        assert step_input.mcp_servers[0]["name"] == "kubectl"

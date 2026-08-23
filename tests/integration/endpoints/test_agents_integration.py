@@ -173,6 +173,67 @@ class TestAgentRunIntegration:
         assert step_input.system_prompt == "Be concise"
 
     @pytest.mark.asyncio
+    async def test_mcp_servers_passed_to_step_input(
+        self,
+        agent_config: Any,
+        mock_request_with_auth: Request,
+        mocker: MockerFixture,
+    ) -> None:
+        """MCP server configs are passed through to StepInput."""
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        mock_exec = _mock_executor(mocker)
+
+        mcp_configs = [
+            {"name": "kubectl", "url": "http://mcp-kubectl:8080/sse"},
+            {
+                "name": "github",
+                "url": "http://mcp-github:8080/sse",
+                "headers": {"Authorization": "Bearer token123"},
+            },
+        ]
+
+        body = AgentRunRequest(
+            prompt="List pods",
+            provider="openai",
+            model="gpt-4o-mini",
+            mcp_servers=mcp_configs,
+        )
+        auth: AuthTuple = ("user-1", "testuser", False, "")
+
+        await run_agent_handler.__wrapped__(mock_request_with_auth, body, auth)
+
+        step_input = mock_exec.run.call_args[0][0]
+        assert step_input.mcp_servers == mcp_configs
+        assert len(step_input.mcp_servers) == 2
+        assert (
+            step_input.mcp_servers[1]["headers"]["Authorization"] == "Bearer token123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_tools_passed_to_step_input(
+        self,
+        agent_config: Any,
+        mock_request_with_auth: Request,
+        mocker: MockerFixture,
+    ) -> None:
+        """Registered tool names are passed through to StepInput."""
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        mock_exec = _mock_executor(mocker)
+
+        body = AgentRunRequest(
+            prompt="Check the cluster",
+            provider="openai",
+            model="gpt-4o-mini",
+            tools=["kubectl_get", "http_request"],
+        )
+        auth: AuthTuple = ("user-1", "testuser", False, "")
+
+        await run_agent_handler.__wrapped__(mock_request_with_auth, body, auth)
+
+        step_input = mock_exec.run.call_args[0][0]
+        assert step_input.tools == ["kubectl_get", "http_request"]
+
+    @pytest.mark.asyncio
     async def test_ephemeral_without_spawner_returns_400(
         self,
         agent_config: Any,

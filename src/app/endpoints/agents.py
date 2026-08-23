@@ -74,6 +74,8 @@ async def run_agent_handler(
         provider={"name": body.provider or "", "model": body.model or ""},
         system_prompt=body.instructions,
         output_schema=body.output_schema,
+        tools=body.tools,
+        mcp_servers=body.mcp_servers,
         context=body.context or {},
         step_name="agent-run",
         output_key="result",

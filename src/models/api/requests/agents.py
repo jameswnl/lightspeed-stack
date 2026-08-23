@@ -54,6 +54,17 @@ class AgentRunRequest(BaseModel):
         description="Container image for spawn=ephemeral.",
     )
 
+    tools: list[str] = Field(
+        default_factory=list,
+        description="Registered tool names for the agent to use.",
+    )
+
+    mcp_servers: Optional[list[dict[str, Any]]] = Field(
+        None,
+        description="MCP server configs: [{name, url, headers}]. "
+        "Each server is connected via pydantic-ai MCPToolset.",
+    )
+
     output_schema: Optional[dict[str, Any]] = Field(
         None,
         description="JSON Schema for structured output.",

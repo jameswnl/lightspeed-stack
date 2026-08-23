@@ -228,6 +228,26 @@ class TestQueryDirectE2E:
         assert result.status == "completed"
         assert "paris" in str(result.output).lower()
 
+    @pytest.mark.asyncio
+    async def test_streaming_query(self, e2e_config: Any) -> None:
+        """Streaming query yields events ending with a complete event."""
+        from workflow.query_executor import stream_query_via_direct_executor
+
+        events = []
+        async for event in stream_query_via_direct_executor(
+            prompt="Say 'hello' and nothing else.",
+            provider="openai",
+            model="gpt-4o-mini",
+        ):
+            events.append(event)
+
+        assert len(events) >= 1
+        complete_events = [e for e in events if e.type == "complete"]
+        assert len(complete_events) == 1
+        assert complete_events[0].result is not None
+        assert complete_events[0].result.status == "completed"
+        assert complete_events[0].result.output is not None
+
 
 class TestWorkflowDefinitionCompatibility:
     """Test that cloud-agents workflow definitions parse correctly."""

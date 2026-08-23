@@ -13,9 +13,11 @@ Differences from /query:
 - No Splunk telemetry (telemetry needs separate migration)
 """
 
+import json
 from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from authentication import get_auth_dependency
@@ -25,7 +27,10 @@ from configuration import configuration
 from log import get_logger
 from models.config import Action
 from utils.endpoints import check_configuration_loaded
-from workflow.query_executor import execute_query_via_direct_executor
+from workflow.query_executor import (
+    execute_query_via_direct_executor,
+    stream_query_via_direct_executor,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["query"])
@@ -154,3 +159,75 @@ async def query_direct_handler(
         },
         "duration_ms": result.duration_ms,
     }
+
+
+@router.post(
+    "/query/direct/stream",
+)
+@authorize(Action.QUERY)
+async def query_direct_stream_handler(
+    request: Request,
+    body: QueryDirectRequest,
+    auth: Annotated[AuthTuple, Depends(get_auth_dependency())],
+) -> StreamingResponse:
+    """Stream a query via DirectExecutor as SSE events.
+
+    Same as /query/direct but streams tokens as they arrive.
+    Uses cloud-agents' StepExecutor.run_stream() for real
+    token-by-token streaming via pydantic-ai.
+
+    Parameters:
+        request: FastAPI request (used by auth middleware).
+        body: Query parameters.
+        auth: Authentication tuple (used by auth decorator).
+
+    Returns:
+        StreamingResponse with SSE events.
+    """
+    _ = request
+
+    user_id, username, _, _ = auth
+
+    check_configuration_loaded(configuration)
+
+    async def event_generator():  # type: ignore[return]
+        """Generate SSE events from DirectExecutor stream."""
+        try:
+            async for event in stream_query_via_direct_executor(
+                prompt=body.prompt,
+                model=body.model,
+                provider=body.provider,
+                instructions=body.instructions,
+                mcp_server_names=body.mcp_servers,
+                output_schema=body.output_schema,
+                context=body.context,
+                user_id=user_id,
+                username=username,
+            ):
+                event_data = {
+                    "type": event.type,
+                    "data": event.data,
+                }
+                if event.result:
+                    event_data["result"] = {
+                        "status": event.result.status,
+                        "output": event.result.output,
+                        "token_usage": {
+                            "input_tokens": event.result.input_tokens,
+                            "output_tokens": event.result.output_tokens,
+                        },
+                        "duration_ms": event.result.duration_ms,
+                    }
+                yield f"data: {json.dumps(event_data)}\n\n"
+        except ValueError as exc:
+            error_event = {"type": "error", "data": {"message": str(exc)}}
+            yield f"data: {json.dumps(error_event)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

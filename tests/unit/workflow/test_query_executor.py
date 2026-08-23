@@ -10,6 +10,7 @@ from pytest_mock import MockerFixture
 from workflow.query_executor import (
     execute_query_via_direct_executor,
     resolve_mcp_servers,
+    stream_query_via_direct_executor,
 )
 
 
@@ -166,3 +167,43 @@ class TestExecuteQueryViaDirectExecutor:
                 provider="openai",
                 model="gpt-4o-mini",
             )
+
+
+class TestStreamQueryViaDirectExecutor:
+    """Tests for stream_query_via_direct_executor."""
+
+    @pytest.mark.asyncio
+    async def test_yields_stream_events(self, mocker: MockerFixture) -> None:
+        """Yields events from executor.run_stream()."""
+        from cloud_agents.workflow.executor.step.base import StreamEvent
+
+        mock_events = [
+            StreamEvent(type="token", data={"delta": "Hello"}),
+            StreamEvent(type="token", data={"delta": " world"}),
+            StreamEvent(type="complete", data={}, result=mocker.MagicMock()),
+        ]
+
+        async def mock_stream(_step_input):  # type: ignore[no-untyped-def]
+            for event in mock_events:
+                yield event
+
+        mock_exec = mocker.MagicMock()
+        mock_exec.run_stream = mock_stream
+        mocker.patch(
+            "workflow.query_executor.get_step_executor",
+            return_value=mock_exec,
+        )
+        mocker.patch("workflow.query_executor.configuration").mcp_servers = []
+
+        events = []
+        async for event in stream_query_via_direct_executor(
+            prompt="Hello",
+            provider="openai",
+            model="gpt-4o-mini",
+        ):
+            events.append(event)
+
+        assert len(events) == 3
+        assert events[0].type == "token"
+        assert events[0].data["delta"] == "Hello"
+        assert events[2].type == "complete"

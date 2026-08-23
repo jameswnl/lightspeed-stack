@@ -8,9 +8,14 @@ DirectExecutor → pydantic-ai for the /query chat agent.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any, Optional
 
-from cloud_agents.workflow.executor.step.base import StepInput, StepResult
+from cloud_agents.workflow.executor.step.base import (
+    StepInput,
+    StepResult,
+    StreamEvent,
+)
 from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 
 from configuration import configuration
@@ -161,3 +166,93 @@ async def execute_query_via_direct_executor(
     )
 
     return result
+
+
+async def stream_query_via_direct_executor(
+    *,
+    prompt: str,
+    model: Optional[str] = None,
+    provider: Optional[str] = None,
+    instructions: Optional[str] = None,
+    mcp_server_names: Optional[list[str]] = None,
+    output_schema: Optional[dict[str, Any]] = None,
+    context: Optional[dict[str, Any]] = None,
+    user_id: str = "",
+    username: str = "",
+) -> AsyncIterator[StreamEvent]:
+    """Stream a query using cloud-agents' DirectExecutor.
+
+    Same as execute_query_via_direct_executor but streams token events
+    as they arrive instead of waiting for the complete result.
+
+    Parameters:
+        prompt: User's query text.
+        model: Model name (e.g. "gpt-4o-mini").
+        provider: Provider name (e.g. "openai").
+        instructions: System prompt / instructions.
+        mcp_server_names: MCP server names to include (None = all).
+        output_schema: Optional structured output schema.
+        context: Prior conversation context.
+        user_id: User identifier for audit logging.
+        username: Username for audit logging.
+
+    Yields:
+        StreamEvent instances (type="token" for deltas, "complete" for final result).
+
+    Raises:
+        ValueError: If provider/model are not specified and no defaults
+            are configured, or if prompt exceeds length limits.
+    """
+    if len(prompt) > MAX_PROMPT_LENGTH:
+        raise ValueError(
+            f"Prompt exceeds maximum length ({len(prompt)} > {MAX_PROMPT_LENGTH})"
+        )
+    if instructions and len(instructions) > MAX_INSTRUCTIONS_LENGTH:
+        raise ValueError(
+            f"Instructions exceed maximum length "
+            f"({len(instructions)} > {MAX_INSTRUCTIONS_LENGTH})"
+        )
+
+    provider_name = provider or ""
+    model_name = model or ""
+    if not provider_name or not model_name:
+        inference = configuration.inference
+        provider_name = provider_name or inference.default_provider or ""
+        model_name = model_name or inference.default_model or ""
+
+    if not provider_name or not model_name:
+        raise ValueError(
+            "Provider and model must be specified or configured as defaults "
+            "(inference.default_provider / inference.default_model)"
+        )
+
+    mcp_servers = resolve_mcp_servers(mcp_server_names)
+
+    step_input = StepInput(
+        prompt=prompt,
+        provider={"name": provider_name, "model": model_name},
+        system_prompt=instructions,
+        output_schema=output_schema,
+        mcp_servers=mcp_servers or None,
+        context=context or {},
+        step_name="query-stream",
+        output_key="response",
+    )
+
+    executor = get_step_executor(_QUERY_STEP_DEF, spawner=None)
+
+    logger.info(
+        "Streaming query via DirectExecutor: user=%s model=%s:%s mcp_servers=%d",
+        username or user_id or "anonymous",
+        provider_name,
+        model_name,
+        len(mcp_servers),
+    )
+
+    async for event in executor.run_stream(step_input):
+        yield event
+
+    logger.info(
+        "Stream completed: user=%s",
+        username or user_id or "anonymous",
+    )

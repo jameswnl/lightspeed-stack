@@ -41,9 +41,9 @@ def _get_executor() -> Any:
             "Set workflow_engine.enabled=true in configuration.",
         )
 
-    from workflow.executor_factory import create_workflow_executor
+    from workflow.executor_factory import create_workflow_runner
 
-    _executor = create_workflow_executor()
+    _executor = create_workflow_runner()
     return _executor
 
 

@@ -195,6 +195,40 @@ class TestAgentRunE2E:
         assert len(str(result["output"])) > 10
 
 
+class TestQueryDirectE2E:
+    """E2E tests for POST /v1/query/direct — the migration path."""
+
+    @pytest.mark.asyncio
+    async def test_simple_query(self, e2e_config: Any) -> None:
+        """Simple query via DirectExecutor returns a response."""
+        from workflow.query_executor import execute_query_via_direct_executor
+
+        result = await execute_query_via_direct_executor(
+            prompt="What is 2 + 2? Reply with just the number.",
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+
+        assert result.status == "completed"
+        assert result.output is not None
+        assert "4" in str(result.output)
+
+    @pytest.mark.asyncio
+    async def test_query_with_instructions(self, e2e_config: Any) -> None:
+        """Query with system instructions via DirectExecutor."""
+        from workflow.query_executor import execute_query_via_direct_executor
+
+        result = await execute_query_via_direct_executor(
+            prompt="What is the capital of France?",
+            provider="openai",
+            model="gpt-4o-mini",
+            instructions="Answer in exactly one word.",
+        )
+
+        assert result.status == "completed"
+        assert "paris" in str(result.output).lower()
+
+
 class TestWorkflowDefinitionCompatibility:
     """Test that cloud-agents workflow definitions parse correctly."""
 

@@ -8,9 +8,14 @@ DirectExecutor → pydantic-ai for the /query chat agent.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any, Optional
 
-from cloud_agents.workflow.executor.step.base import StepInput, StepResult
+from cloud_agents.workflow.executor.step.base import (
+    StepInput,
+    StepResult,
+    StreamEvent,
+)
 from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 
 from configuration import configuration
@@ -67,41 +72,36 @@ def resolve_mcp_servers(
     return mcp_configs
 
 
-async def execute_query_via_direct_executor(
+def _validate_and_build_step_input(
     *,
     prompt: str,
-    model: Optional[str] = None,
-    provider: Optional[str] = None,
-    instructions: Optional[str] = None,
-    mcp_server_names: Optional[list[str]] = None,
-    output_schema: Optional[dict[str, Any]] = None,
-    context: Optional[dict[str, Any]] = None,
-    user_id: str = "",
-    username: str = "",
-) -> StepResult:
-    """Execute a query using cloud-agents' DirectExecutor.
+    model: Optional[str],
+    provider: Optional[str],
+    instructions: Optional[str],
+    mcp_server_names: Optional[list[str]],
+    output_schema: Optional[dict[str, Any]],
+    context: Optional[dict[str, Any]],
+    step_name: str,
+) -> tuple[StepInput, str, str]:
+    """Validate inputs and build a StepInput.
 
-    This is the migration path for /query — same capabilities as
-    build_agent() but using DirectExecutor → pydantic-ai directly,
-    no Llama Stack in the path.
+    Shared by both blocking and streaming execution paths.
 
     Parameters:
         prompt: User's query text.
-        model: Model name (e.g. "gpt-4o-mini").
-        provider: Provider name (e.g. "openai").
-        instructions: System prompt / instructions.
-        mcp_server_names: MCP server names to include (None = all).
-        output_schema: Optional structured output schema.
-        context: Prior conversation context.
-        user_id: User identifier for audit logging.
-        username: Username for audit logging.
+        model: Model name.
+        provider: Provider name.
+        instructions: System prompt.
+        mcp_server_names: MCP server names to resolve.
+        output_schema: Structured output schema.
+        context: Prior context.
+        step_name: Step name for logging.
 
     Returns:
-        StepResult with agent response, transcript, and metrics.
+        Tuple of (StepInput, resolved_provider, resolved_model).
 
     Raises:
-        ValueError: If provider/model are not specified and no defaults
-            are configured, or if prompt exceeds length limits.
+        ValueError: On validation failure.
     """
     if len(prompt) > MAX_PROMPT_LENGTH:
         raise ValueError(
@@ -135,25 +135,71 @@ async def execute_query_via_direct_executor(
         output_schema=output_schema,
         mcp_servers=mcp_servers or None,
         context=context or {},
-        step_name="query",
+        step_name=step_name,
         output_key="response",
     )
 
+    return step_input, provider_name, model_name
+
+
+async def execute_query_via_direct_executor(
+    *,
+    prompt: str,
+    model: Optional[str] = None,
+    provider: Optional[str] = None,
+    instructions: Optional[str] = None,
+    mcp_server_names: Optional[list[str]] = None,
+    output_schema: Optional[dict[str, Any]] = None,
+    context: Optional[dict[str, Any]] = None,
+    user_id: str = "",
+    username: str = "",
+) -> StepResult:
+    """Execute a query using cloud-agents' DirectExecutor (blocking).
+
+    Parameters:
+        prompt: User's query text.
+        model: Model name (e.g. "gpt-4o-mini").
+        provider: Provider name (e.g. "openai").
+        instructions: System prompt / instructions.
+        mcp_server_names: MCP server names to include (None = all).
+        output_schema: Optional structured output schema.
+        context: Prior conversation context.
+        user_id: User identifier for audit logging.
+        username: Username for audit logging.
+
+    Returns:
+        StepResult with agent response, transcript, and metrics.
+
+    Raises:
+        ValueError: On validation failure.
+    """
+    step_input, provider_name, model_name = _validate_and_build_step_input(
+        prompt=prompt,
+        model=model,
+        provider=provider,
+        instructions=instructions,
+        mcp_server_names=mcp_server_names,
+        output_schema=output_schema,
+        context=context,
+        step_name="query",
+    )
+
     executor = get_step_executor(_QUERY_STEP_DEF, spawner=None)
+    user_label = username or user_id or "anonymous"
 
     logger.info(
         "Query via DirectExecutor: user=%s model=%s:%s mcp_servers=%d",
-        username or user_id or "anonymous",
+        user_label,
         provider_name,
         model_name,
-        len(mcp_servers),
+        len(step_input.mcp_servers or []),
     )
 
     result = await executor.run(step_input)
 
     logger.info(
         "Query completed: user=%s status=%s duration_ms=%d tokens_in=%d tokens_out=%d",
-        username or user_id or "anonymous",
+        user_label,
         result.status,
         result.duration_ms,
         result.input_tokens,
@@ -161,3 +207,67 @@ async def execute_query_via_direct_executor(
     )
 
     return result
+
+
+async def stream_query_via_direct_executor(
+    *,
+    prompt: str,
+    model: Optional[str] = None,
+    provider: Optional[str] = None,
+    instructions: Optional[str] = None,
+    mcp_server_names: Optional[list[str]] = None,
+    output_schema: Optional[dict[str, Any]] = None,
+    context: Optional[dict[str, Any]] = None,
+    user_id: str = "",
+    username: str = "",
+) -> AsyncIterator[StreamEvent]:
+    """Stream a query using cloud-agents' DirectExecutor.
+
+    When tools or MCP servers are configured, yields real token-by-token
+    events via pydantic-ai Agent.run_stream(). Without tools, falls back
+    to a single complete event (no intermediate token events).
+
+    Parameters:
+        prompt: User's query text.
+        model: Model name (e.g. "gpt-4o-mini").
+        provider: Provider name (e.g. "openai").
+        instructions: System prompt / instructions.
+        mcp_server_names: MCP server names to include (None = all).
+        output_schema: Optional structured output schema.
+        context: Prior conversation context.
+        user_id: User identifier for audit logging.
+        username: Username for audit logging.
+
+    Yields:
+        StreamEvent instances. Token-by-token when tools/MCP are
+        configured; single complete event otherwise.
+
+    Raises:
+        ValueError: On validation failure (raised BEFORE streaming starts).
+    """
+    step_input, provider_name, model_name = _validate_and_build_step_input(
+        prompt=prompt,
+        model=model,
+        provider=provider,
+        instructions=instructions,
+        mcp_server_names=mcp_server_names,
+        output_schema=output_schema,
+        context=context,
+        step_name="query-stream",
+    )
+
+    executor = get_step_executor(_QUERY_STEP_DEF, spawner=None)
+    user_label = username or user_id or "anonymous"
+
+    logger.info(
+        "Streaming query via DirectExecutor: user=%s model=%s:%s mcp_servers=%d",
+        user_label,
+        provider_name,
+        model_name,
+        len(step_input.mcp_servers or []),
+    )
+
+    async for event in executor.run_stream(step_input):
+        yield event
+
+    logger.info("Stream completed: user=%s", user_label)

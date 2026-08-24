@@ -154,10 +154,15 @@ def _get_or_create_runner(
         run_store = None
         transcript_store = None
 
+    from workflow.middleware import (
+        get_default_middleware,
+    )  # pylint: disable=import-outside-toplevel
+
     _runner = ChatWorkflowRunner(
         run_store=run_store,
         transcript_store=transcript_store,
         config=config,
+        middlewares=get_default_middleware(),
     )
     return _runner
 

@@ -130,6 +130,9 @@ def _get_or_create_runner(
     """
     global _runner
 
+    if _runner is not None:
+        return _runner
+
     mcp_servers = resolve_mcp_servers(mcp_server_names)
 
     config = ChatWorkflowConfig(
@@ -151,6 +154,12 @@ def _get_or_create_runner(
         config=config,
     )
     return _runner
+
+
+def reset_runner() -> None:
+    """Reset the runner singleton (for testing)."""
+    global _runner
+    _runner = None
 
 
 async def execute_query_via_direct_executor(  # pylint: disable=too-many-arguments

@@ -196,6 +196,23 @@ class TestExecuteQueryViaChatWorkflowRunner:
         mock_runner.start.assert_not_called()
         mock_runner.send_message.assert_called_once_with("existing-conv", "Hello")
 
+    @pytest.mark.asyncio
+    async def test_output_schema_raises(self, mocker: MockerFixture) -> None:
+        """output_schema raises ValueError (not yet supported)."""
+        mocker.patch("workflow.query_executor.configuration").mcp_servers = []
+        mocker.patch(
+            "workflow.query_executor._resolve_provider",
+            return_value={"name": "openai", "model": "gpt-4o-mini"},
+        )
+
+        with pytest.raises(ValueError, match="not yet supported"):
+            await execute_query_via_direct_executor(
+                prompt="Hello",
+                provider="openai",
+                model="gpt-4o-mini",
+                output_schema={"type": "object"},
+            )
+
 
 class TestStreamQueryViaChatWorkflowRunner:
     """Tests for stream_query_via_direct_executor."""
@@ -239,3 +256,34 @@ class TestStreamQueryViaChatWorkflowRunner:
         assert len(events) == 2
         assert events[0].type == "token"
         assert events[1].type == "complete"
+
+    @pytest.mark.asyncio
+    async def test_reuses_conversation_id(self, mocker: MockerFixture) -> None:
+        """Streaming with conversation_id skips start()."""
+        from cloud_agents.workflow.executor.step.base import StreamEvent
+
+        async def mock_stream(_wf_id: str, _prompt: str):  # type: ignore[no-untyped-def]
+            yield StreamEvent(type="complete", data={}, result=mocker.MagicMock())
+
+        mock_runner = mocker.AsyncMock()
+        mock_runner.send_message_stream = mock_stream
+
+        mocker.patch(
+            "workflow.query_executor._get_or_create_runner",
+            return_value=mock_runner,
+        )
+        mocker.patch("workflow.query_executor.configuration").mcp_servers = []
+        mocker.patch(
+            "workflow.query_executor._resolve_provider",
+            return_value={"name": "openai", "model": "gpt-4o-mini"},
+        )
+
+        async for _ in stream_query_via_direct_executor(
+            prompt="Hello",
+            provider="openai",
+            model="gpt-4o-mini",
+            conversation_id="existing-stream-conv",
+        ):
+            pass
+
+        mock_runner.start.assert_not_called()

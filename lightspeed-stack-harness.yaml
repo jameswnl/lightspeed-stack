@@ -1,0 +1,42 @@
+name: Lightspeed Core Stack (Harness)
+service:
+  host: 0.0.0.0
+  port: 8090
+  base_url: http://localhost:8090
+  auth_enabled: false
+  workers: 1
+  color_log: true
+  access_log: true
+
+llama_stack:
+  use_as_library_client: false
+  url: http://localhost:8321
+  allow_degraded_mode: true
+
+user_data_collection:
+  feedback_enabled: false
+
+database:
+  postgres:
+    host: localhost
+    port: 5432
+    db: lightspeed
+    user: lightspeed
+    password: lightspeed
+
+conversation_cache:
+  type: "postgres"
+  postgres:
+    host: localhost
+    port: 5432
+    db: lightspeed
+    user: lightspeed
+    password: lightspeed
+
+authentication:
+  module: "noop"
+
+workflow_engine:
+  enabled: true
+  max_concurrent_workflows: 10
+  transcript_retention_days: 30

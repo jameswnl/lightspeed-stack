@@ -135,9 +135,15 @@ def _get_or_create_runner(
 
     mcp_servers = resolve_mcp_servers(mcp_server_names)
 
+    from utils.prompts import (
+        get_system_prompt,
+    )  # pylint: disable=import-outside-toplevel
+
+    resolved_instructions = get_system_prompt(instructions)
+
     config = ChatWorkflowConfig(
         provider=provider,
-        system_prompt=instructions,
+        system_prompt=resolved_instructions,
         mcp_servers=mcp_servers or None,
     )
 

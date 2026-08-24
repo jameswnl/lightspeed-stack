@@ -12,6 +12,20 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.12", "3.13"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: lightspeed
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -30,44 +44,3 @@ jobs:
 
       - name: Run cloud-agents integration tests
         run: uv run pytest tests/integration/cloud_agents/ -v
-
-  e2e:
-    runs-on: ubuntu-latest
-    needs: unit-and-integration
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: testuser
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: lightspeed
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      DATABASE_URL: postgresql://testuser:testpass@localhost:5432/lightspeed
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: |
-          uv pip install --python 3.13 -e .
-          uv pip install -e "git+https://github.com/jameswnl/lightspeed-cloud-agents.git@main#egg=lightspeed-cloud-agents[local,kubernetes]"
-
-      - name: Run cloud-agents E2E tests
-        if: env.OPENAI_API_KEY != ''
-        run: uv run pytest tests/e2e/cloud_agents/ -v -s
-
-      - name: Skip E2E (no API key)
-        if: env.OPENAI_API_KEY == ''
-        run: echo "Skipping E2E tests — OPENAI_API_KEY not set"

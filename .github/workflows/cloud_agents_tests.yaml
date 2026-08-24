@@ -1,0 +1,46 @@
+name: Cloud Agents Tests
+
+on:
+  push:
+    branches: [harness]
+  pull_request:
+    branches: [harness]
+
+jobs:
+  unit-and-integration:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: lightspeed
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          uv pip install --python ${{ matrix.python-version }} -e .
+          uv pip install -e "git+https://github.com/jameswnl/lightspeed-cloud-agents.git@main#egg=lightspeed-cloud-agents[local,kubernetes]"
+
+      - name: Run cloud-agents unit tests
+        run: uv run pytest tests/unit/cloud_agents/ -v
+
+      - name: Run cloud-agents integration tests
+        run: uv run pytest tests/integration/cloud_agents/ -v

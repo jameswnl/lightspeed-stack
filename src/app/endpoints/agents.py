@@ -4,7 +4,7 @@
 
 from typing import Annotated, Any
 
-from cloud_agents.workflow.executor.step.base import StepInput
+from cloud_agents.workflow.executor.step.base import StepInput, StepMetadata
 from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
@@ -49,7 +49,6 @@ async def run_agent_handler(
     Returns:
         Agent execution result with status, output, and transcript.
     """
-    _ = auth
     _ = request
 
     check_configuration_loaded(configuration)
@@ -69,6 +68,8 @@ async def run_agent_handler(
 
     executor = get_step_executor(step_def, spawner=None)
 
+    user_id, username, _, _ = auth
+
     step_input = StepInput(
         prompt=body.prompt,
         provider={"name": body.provider or "", "model": body.model or ""},
@@ -79,6 +80,7 @@ async def run_agent_handler(
         context=body.context or {},
         step_name="agent-run",
         output_key="result",
+        metadata=StepMetadata(user_id=user_id),
     )
 
     result = await executor.run(step_input)

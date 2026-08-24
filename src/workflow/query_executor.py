@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from cloud_agents.workflow.executor.step.base import (
     StepInput,
+    StepMetadata,
     StepResult,
     StreamEvent,
 )
@@ -72,7 +73,7 @@ def resolve_mcp_servers(
     return mcp_configs
 
 
-def _validate_and_build_step_input(
+def _validate_and_build_step_input(  # pylint: disable=too-many-arguments
     *,
     prompt: str,
     model: Optional[str],
@@ -82,6 +83,8 @@ def _validate_and_build_step_input(
     output_schema: Optional[dict[str, Any]],
     context: Optional[dict[str, Any]],
     step_name: str,
+    user_id: str = "",
+    session_id: str = "",
 ) -> tuple[StepInput, str, str]:
     """Validate inputs and build a StepInput.
 
@@ -128,6 +131,8 @@ def _validate_and_build_step_input(
 
     mcp_servers = resolve_mcp_servers(mcp_server_names)
 
+    metadata = StepMetadata(user_id=user_id or None, session_id=session_id or None)
+
     step_input = StepInput(
         prompt=prompt,
         provider={"name": provider_name, "model": model_name},
@@ -137,6 +142,7 @@ def _validate_and_build_step_input(
         context=context or {},
         step_name=step_name,
         output_key="response",
+        metadata=metadata,
     )
 
     return step_input, provider_name, model_name
@@ -182,6 +188,7 @@ async def execute_query_via_direct_executor(
         output_schema=output_schema,
         context=context,
         step_name="query",
+        user_id=user_id,
     )
 
     executor = get_step_executor(_QUERY_STEP_DEF, spawner=None)
@@ -254,6 +261,7 @@ async def stream_query_via_direct_executor(
         output_schema=output_schema,
         context=context,
         step_name="query-stream",
+        user_id=user_id,
     )
 
     executor = get_step_executor(_QUERY_STEP_DEF, spawner=None)

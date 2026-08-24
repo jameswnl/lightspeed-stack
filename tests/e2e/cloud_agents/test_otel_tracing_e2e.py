@@ -106,7 +106,6 @@ class TestOtelTracingE2E:
         if not await _check_jaeger_available():
             pytest.skip("Jaeger not available")
 
-
         from configuration import configuration
         from workflow.query_executor import execute_query_via_direct_executor
 

@@ -185,41 +185,35 @@ async def query_direct_stream_handler(
     check_configuration_loaded(configuration)
 
     try:
-        step_input_args = dict(
-            prompt=body.query,
-            model=body.model,
-            provider=body.provider,
-            instructions=body.system_prompt,
-            mcp_server_names=body.mcp_servers,
-            output_schema=body.output_schema,
-            user_id=user_id,
-            username=username,
-        )
         from workflow.query_executor import (  # pylint: disable=import-outside-toplevel
-            _validate_and_build_step_input,
+            _resolve_provider,
+            _validate_prompt,
         )
 
-        _validate_and_build_step_input(
-            prompt=body.query,
-            model=body.model,
-            provider=body.provider,
-            instructions=body.system_prompt,
-            mcp_server_names=body.mcp_servers,
-            output_schema=body.output_schema,
-            context=None,
-            step_name="validate",
-        )
+        _validate_prompt(body.query, body.system_prompt)
+        _resolve_provider(body.provider, body.model)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
 
+    stream_args = dict(
+        prompt=body.query,
+        model=body.model,
+        provider=body.provider,
+        instructions=body.system_prompt,
+        mcp_server_names=body.mcp_servers,
+        output_schema=body.output_schema,
+        user_id=user_id,
+        username=username,
+    )
+
     async def event_generator() -> AsyncIterator[str]:
         """Generate SSE events from DirectExecutor stream."""
         try:
             async for event in stream_query_via_direct_executor(
-                **step_input_args,
+                **stream_args,
             ):
                 event_data: dict[str, Any] = {
                     "type": event.type,

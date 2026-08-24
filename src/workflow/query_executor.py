@@ -187,6 +187,8 @@ async def execute_query_via_direct_executor(  # pylint: disable=too-many-argumen
         ValueError: On validation failure.
     """
     _validate_prompt(prompt, instructions)
+    if output_schema:
+        raise ValueError("output_schema is not yet supported via ChatWorkflowRunner")
     resolved_provider = _resolve_provider(provider, model)
     user_label = username or user_id or "anonymous"
 
@@ -232,6 +234,7 @@ async def stream_query_via_direct_executor(
     mcp_server_names: Optional[list[str]] = None,
     output_schema: Optional[dict[str, Any]] = None,
     context: Optional[dict[str, Any]] = None,
+    conversation_id: Optional[str] = None,
     user_id: str = "",
     username: str = "",
 ) -> AsyncIterator[StreamEvent]:
@@ -243,8 +246,9 @@ async def stream_query_via_direct_executor(
         provider: Provider name (e.g. "openai").
         instructions: System prompt / instructions.
         mcp_server_names: MCP server names to include (None = all).
-        output_schema: Optional structured output schema.
+        output_schema: Not yet supported — raises ValueError if set.
         context: Prior conversation context.
+        conversation_id: Conversation ID for multi-turn.
         user_id: User identifier for audit logging.
         username: Username for audit logging.
 
@@ -255,6 +259,10 @@ async def stream_query_via_direct_executor(
         ValueError: On validation failure (raised BEFORE streaming starts).
     """
     _validate_prompt(prompt, instructions)
+    if output_schema:
+        raise ValueError(
+            "output_schema is not yet supported via ChatWorkflowRunner streaming"
+        )
     resolved_provider = _resolve_provider(provider, model)
     user_label = username or user_id or "anonymous"
 
@@ -264,7 +272,8 @@ async def stream_query_via_direct_executor(
         mcp_server_names=mcp_server_names,
     )
 
-    conversation_id = await runner.start({"user_id": user_id or None})
+    if not conversation_id:
+        conversation_id = await runner.start({"user_id": user_id or None})
 
     logger.info(
         "Streaming query via ChatWorkflowRunner: user=%s conv=%s model=%s:%s",

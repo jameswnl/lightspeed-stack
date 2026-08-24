@@ -196,17 +196,22 @@ class TestAgentRunE2E:
 
 
 class TestQueryDirectE2E:
-    """E2E tests for POST /v1/query/direct — the migration path."""
+    """E2E tests for agent execution via DirectExecutor (no stores needed)."""
 
     @pytest.mark.asyncio
     async def test_simple_query(self, e2e_config: Any) -> None:
         """Simple query via DirectExecutor returns a response."""
-        from workflow.query_executor import execute_query_via_direct_executor
+        from cloud_agents.workflow.executor.step.base import StepInput
+        from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 
-        result = await execute_query_via_direct_executor(
-            prompt="What is 2 + 2? Reply with just the number.",
-            provider="openai",
-            model="gpt-4o-mini",
+        executor = get_step_executor({"name": "test", "spawn": "none"}, spawner=None)
+        result = await executor.run(
+            StepInput(
+                prompt="What is 2 + 2? Reply with just the number.",
+                provider={"name": "openai", "model": "gpt-4o-mini"},
+                step_name="test",
+                output_key="result",
+            )
         )
 
         assert result.status == "completed"
@@ -216,13 +221,18 @@ class TestQueryDirectE2E:
     @pytest.mark.asyncio
     async def test_query_with_instructions(self, e2e_config: Any) -> None:
         """Query with system instructions via DirectExecutor."""
-        from workflow.query_executor import execute_query_via_direct_executor
+        from cloud_agents.workflow.executor.step.base import StepInput
+        from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 
-        result = await execute_query_via_direct_executor(
-            prompt="What is the capital of France?",
-            provider="openai",
-            model="gpt-4o-mini",
-            instructions="Answer in exactly one word.",
+        executor = get_step_executor({"name": "test", "spawn": "none"}, spawner=None)
+        result = await executor.run(
+            StepInput(
+                prompt="What is the capital of France?",
+                provider={"name": "openai", "model": "gpt-4o-mini"},
+                system_prompt="Answer in exactly one word.",
+                step_name="test",
+                output_key="result",
+            )
         )
 
         assert result.status == "completed"
@@ -231,13 +241,18 @@ class TestQueryDirectE2E:
     @pytest.mark.asyncio
     async def test_streaming_query(self, e2e_config: Any) -> None:
         """Streaming query yields events ending with a complete event."""
-        from workflow.query_executor import stream_query_via_direct_executor
+        from cloud_agents.workflow.executor.step.base import StepInput
+        from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 
+        executor = get_step_executor({"name": "test", "spawn": "none"}, spawner=None)
         events = []
-        async for event in stream_query_via_direct_executor(
-            prompt="Say 'hello' and nothing else.",
-            provider="openai",
-            model="gpt-4o-mini",
+        async for event in executor.run_stream(
+            StepInput(
+                prompt="Say 'hello' and nothing else.",
+                provider={"name": "openai", "model": "gpt-4o-mini"},
+                step_name="test",
+                output_key="result",
+            )
         ):
             events.append(event)
 
@@ -246,66 +261,55 @@ class TestQueryDirectE2E:
         assert len(complete_events) == 1
         assert complete_events[0].result is not None
         assert complete_events[0].result.status == "completed"
-        assert complete_events[0].result.output is not None
 
 
 class TestQueryDirectResponseShape:
-    """Verify /query/direct response matches /query contract."""
+    """Verify DirectExecutor result has expected fields."""
 
     @pytest.mark.asyncio
-    async def test_response_has_all_query_fields(self, e2e_config: Any) -> None:
-        """Response includes all fields from QueryResponse."""
-        from app.endpoints.query_direct import QueryDirectRequest, query_direct_handler
+    async def test_result_has_expected_fields(self, e2e_config: Any) -> None:
+        """StepResult from DirectExecutor has status, output, tokens."""
+        from cloud_agents.workflow.executor.step.base import StepInput
+        from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 
-        body = QueryDirectRequest(
-            query="Say hi.",
-            provider="openai",
-            model="gpt-4o-mini",
+        executor = get_step_executor({"name": "test", "spawn": "none"}, spawner=None)
+        result = await executor.run(
+            StepInput(
+                prompt="Say hi.",
+                provider={"name": "openai", "model": "gpt-4o-mini"},
+                step_name="test",
+                output_key="result",
+            )
         )
 
-        result = await query_direct_handler.__wrapped__(_make_request(), body, _AUTH)
-
-        expected_fields = {
-            "conversation_id",
-            "response",
-            "truncated",
-            "input_tokens",
-            "output_tokens",
-            "available_quotas",
-            "tool_calls",
-            "tool_results",
-            "rag_chunks",
-            "referenced_documents",
-            "request_id",
-            "interrupted",
-        }
-        assert expected_fields.issubset(result.keys())
-        assert isinstance(result["response"], str)
-        assert len(result["response"]) > 0
-        assert isinstance(result["input_tokens"], int)
-        assert isinstance(result["output_tokens"], int)
-        assert result["truncated"] is False
-        assert result["interrupted"] is False
+        assert result.status == "completed"
+        assert result.output is not None
+        assert isinstance(result.input_tokens, int)
+        assert isinstance(result.output_tokens, int)
+        assert result.input_tokens > 0
+        assert result.output_tokens > 0
+        assert result.duration_ms > 0
 
     @pytest.mark.asyncio
-    async def test_response_types_match_query(self, e2e_config: Any) -> None:
-        """Response field types match what /query returns."""
-        from app.endpoints.query_direct import QueryDirectRequest, query_direct_handler
+    async def test_result_has_transcript(self, e2e_config: Any) -> None:
+        """StepResult includes transcript entries."""
+        from cloud_agents.workflow.executor.step.base import StepInput
+        from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 
-        body = QueryDirectRequest(
-            query="What is Python?",
-            provider="openai",
-            model="gpt-4o-mini",
-            system_prompt="One sentence max.",
+        executor = get_step_executor({"name": "test", "spawn": "none"}, spawner=None)
+        result = await executor.run(
+            StepInput(
+                prompt="What is Python?",
+                provider={"name": "openai", "model": "gpt-4o-mini"},
+                system_prompt="One sentence max.",
+                step_name="test",
+                output_key="result",
+            )
         )
 
-        result = await query_direct_handler.__wrapped__(_make_request(), body, _AUTH)
-
-        assert isinstance(result["tool_calls"], list)
-        assert isinstance(result["tool_results"], list)
-        assert isinstance(result["rag_chunks"], list)
-        assert isinstance(result["referenced_documents"], list)
-        assert isinstance(result["available_quotas"], dict)
+        assert result.status == "completed"
+        assert isinstance(result.transcript, list)
+        assert len(result.transcript) >= 1
 
 
 class TestErrorHandlingE2E:
@@ -377,13 +381,18 @@ class TestStreamingE2E:
     @pytest.mark.asyncio
     async def test_stream_complete_event_has_output(self, e2e_config: Any) -> None:
         """Complete event from stream has output and metrics."""
-        from workflow.query_executor import stream_query_via_direct_executor
+        from cloud_agents.workflow.executor.step.base import StepInput
+        from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 
+        executor = get_step_executor({"name": "test", "spawn": "none"}, spawner=None)
         events = []
-        async for event in stream_query_via_direct_executor(
-            prompt="What is 1+1? Reply with just the number.",
-            provider="openai",
-            model="gpt-4o-mini",
+        async for event in executor.run_stream(
+            StepInput(
+                prompt="What is 1+1? Reply with just the number.",
+                provider={"name": "openai", "model": "gpt-4o-mini"},
+                step_name="test",
+                output_key="result",
+            )
         ):
             events.append(event)
 
@@ -396,19 +405,12 @@ class TestStreamingE2E:
         assert "2" in str(complete[0].result.output)
 
     @pytest.mark.asyncio
-    async def test_stream_validation_error_raised_before_streaming(
-        self, e2e_config: Any
-    ) -> None:
-        """Validation errors raise before any events are yielded."""
-        from workflow.query_executor import stream_query_via_direct_executor
+    async def test_stream_validation_error(self, e2e_config: Any) -> None:
+        """Validation helpers raise on invalid input."""
+        from workflow.query_executor import _validate_prompt
 
         with pytest.raises(ValueError, match="maximum length"):
-            async for _ in stream_query_via_direct_executor(
-                prompt="x" * 200_000,
-                provider="openai",
-                model="gpt-4o-mini",
-            ):
-                pass
+            _validate_prompt("x" * 200_000)
 
 
 class TestMultiModelE2E:

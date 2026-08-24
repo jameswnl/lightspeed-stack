@@ -135,9 +135,15 @@ def _get_or_create_runner(
 
     mcp_servers = resolve_mcp_servers(mcp_server_names)
 
+    resolved_instructions = instructions
+    if not resolved_instructions:
+        customization = getattr(configuration, "customization", None)
+        if customization:
+            resolved_instructions = getattr(customization, "system_prompt", None)
+
     config = ChatWorkflowConfig(
         provider=provider,
-        system_prompt=instructions,
+        system_prompt=resolved_instructions,
         mcp_servers=mcp_servers or None,
     )
 

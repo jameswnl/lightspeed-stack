@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from pytest_mock import MockerFixture
 
+from utils.otel_tracing import SpanAttributes
 from workflow.middleware import (
     AuditMiddleware,
     QuotaMiddleware,
@@ -65,10 +66,18 @@ class TestTracingMiddleware:
         returned = await mw.after(step_input, result)
 
         assert returned is result
-        mock_span.set_attribute.assert_any_call("llm.model.id", "openai:gpt-4o-mini")
-        mock_span.set_attribute.assert_any_call("llm.usage.input_tokens", 50)
-        mock_span.set_attribute.assert_any_call("llm.usage.output_tokens", 25)
-        mock_span.set_attribute.assert_any_call("user.id", "anon:test-user")
+        mock_span.set_attribute.assert_any_call(
+            SpanAttributes.LLM_MODEL_ID, "openai:gpt-4o-mini"
+        )
+        mock_span.set_attribute.assert_any_call(
+            SpanAttributes.LLM_USAGE_INPUT_TOKENS, 50
+        )
+        mock_span.set_attribute.assert_any_call(
+            SpanAttributes.LLM_USAGE_OUTPUT_TOKENS, 25
+        )
+        mock_span.set_attribute.assert_any_call(
+            SpanAttributes.USER_ID, "anon:test-user"
+        )
 
     @pytest.mark.asyncio
     async def test_after_noop_when_not_recording(self, mocker: MockerFixture) -> None:
@@ -85,6 +94,46 @@ class TestTracingMiddleware:
 
         mock_span.set_attribute.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_after_handles_none_metadata(self, mocker: MockerFixture) -> None:
+        """Handles step_input with metadata=None."""
+        mock_span = mocker.MagicMock()
+        mock_span.is_recording.return_value = True
+        mocker.patch(
+            "workflow.middleware.trace.get_current_span",
+            return_value=mock_span,
+        )
+
+        mw = TracingMiddleware()
+        step_input = _make_step_input(mocker)
+        step_input.metadata = None
+        result = _make_result(mocker)
+
+        await mw.after(step_input, result)
+
+        calls = [str(c) for c in mock_span.set_attribute.call_args_list]
+        assert not any("user.id" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_after_skips_empty_provider(self, mocker: MockerFixture) -> None:
+        """Skips model_id attribute when provider is empty."""
+        mock_span = mocker.MagicMock()
+        mock_span.is_recording.return_value = True
+        mocker.patch(
+            "workflow.middleware.trace.get_current_span",
+            return_value=mock_span,
+        )
+
+        mw = TracingMiddleware()
+        step_input = _make_step_input(mocker)
+        step_input.provider = {}
+        result = _make_result(mocker)
+
+        await mw.after(step_input, result)
+
+        calls = [str(c) for c in mock_span.set_attribute.call_args_list]
+        assert not any("llm.model.id" in c for c in calls)
+
 
 class TestAuditMiddleware:
     """Tests for AuditMiddleware."""
@@ -98,6 +147,16 @@ class TestAuditMiddleware:
 
         assert await mw.before(step_input) is step_input
         assert await mw.after(step_input, result) is result
+
+    @pytest.mark.asyncio
+    async def test_handles_none_metadata(self, mocker: MockerFixture) -> None:
+        """Uses 'anonymous' when metadata is None."""
+        mw = AuditMiddleware()
+        step_input = _make_step_input(mocker)
+        step_input.metadata = None
+
+        returned = await mw.before(step_input)
+        assert returned is step_input
 
 
 class TestQuotaMiddleware:

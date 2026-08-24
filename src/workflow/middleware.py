@@ -35,9 +35,13 @@ class TracingMiddleware:
             return result
 
         provider = step_input.provider or {}
-        model_id = f"{provider.get('name', '')}:{provider.get('model', '')}"
-
-        span.set_attribute(SpanAttributes.LLM_MODEL_ID, model_id)
+        provider_name = provider.get("name", "")
+        model_name = provider.get("model", "")
+        if provider_name or model_name:
+            span.set_attribute(
+                SpanAttributes.LLM_MODEL_ID,
+                f"{provider_name}:{model_name}",
+            )
         span.set_attribute(SpanAttributes.LLM_USAGE_INPUT_TOKENS, result.input_tokens)
         span.set_attribute(SpanAttributes.LLM_USAGE_OUTPUT_TOKENS, result.output_tokens)
 
@@ -97,10 +101,12 @@ class QuotaMiddleware:
     async def after(self, step_input: StepInput, result: StepResult) -> StepResult:
         """Deduct tokens after execution."""
         user = step_input.metadata.user_id if step_input.metadata else None
-        if user and result.status == "completed":
+        # Track consumption regardless of status — failed steps still use tokens
+        if user:
             logger.debug(
-                "Quota deduct: user=%s tokens=%d (enforcement pending)",
+                "Quota deduct: user=%s status=%s tokens=%d (enforcement pending)",
                 user,
+                result.status,
                 result.input_tokens + result.output_tokens,
             )
         return result

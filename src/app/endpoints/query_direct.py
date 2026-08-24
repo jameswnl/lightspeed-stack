@@ -39,10 +39,10 @@ class QueryDirectRequest(BaseModel):
     """Request body for POST /v1/query/direct.
 
     Field names match QueryRequest for API compatibility.
-    conversation_id is accepted but NOT used yet (issue #9 gap #1).
 
     Attributes:
         query: The query string.
+        conversation_id: Optional conversation ID for multi-turn.
         provider: Optional provider name.
         model: Optional model name.
         system_prompt: Optional system prompt.
@@ -54,6 +54,11 @@ class QueryDirectRequest(BaseModel):
         ...,
         description="The query string",
         examples=["What is Kubernetes?"],
+    )
+
+    conversation_id: Optional[str] = Field(
+        None,
+        description="Conversation ID for multi-turn (requires PostgreSQL transcript store)",
     )
 
     provider: Optional[str] = Field(
@@ -128,6 +133,7 @@ async def query_direct_handler(
             instructions=body.system_prompt,
             mcp_server_names=body.mcp_servers,
             output_schema=body.output_schema,
+            conversation_id=body.conversation_id,
             user_id=user_id,
             username=username,
         )
@@ -138,7 +144,7 @@ async def query_direct_handler(
         ) from exc
 
     return {
-        "conversation_id": None,
+        "conversation_id": body.conversation_id,
         "response": _serialize_output(result.output),
         "truncated": False,
         "input_tokens": result.input_tokens,

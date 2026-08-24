@@ -8,6 +8,8 @@ import pytest
 from pytest_mock import MockerFixture
 
 from workflow.query_executor import (
+    _load_conversation_context,
+    _save_conversation_turn,
     execute_query_via_direct_executor,
     resolve_mcp_servers,
     stream_query_via_direct_executor,
@@ -167,6 +169,144 @@ class TestExecuteQueryViaDirectExecutor:
                 provider="openai",
                 model="gpt-4o-mini",
             )
+
+
+class TestLoadConversationContext:
+    """Tests for _load_conversation_context."""
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_store_unavailable(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Returns empty dict when TranscriptStore is not initialized."""
+        mocker.patch(
+            "workflow.query_executor.WorkflowStorageFactory.get_transcript_store",
+            side_effect=RuntimeError("not initialized"),
+        )
+        result = await _load_conversation_context("conv-1")
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_turns(self, mocker: MockerFixture) -> None:
+        """Returns empty dict when no prior turns exist."""
+        mock_store = mocker.AsyncMock()
+        mock_store.load_recent_turns.return_value = []
+        mocker.patch(
+            "workflow.query_executor.WorkflowStorageFactory.get_transcript_store",
+            return_value=mock_store,
+        )
+        result = await _load_conversation_context("conv-1")
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_loads_conversation_history(self, mocker: MockerFixture) -> None:
+        """Returns conversation history from prior turns."""
+        mock_store = mocker.AsyncMock()
+        mock_store.load_recent_turns.return_value = [
+            {
+                "messages": [
+                    {"role": "user", "content": "Hello"},
+                    {"role": "assistant", "content": "Hi there"},
+                ]
+            }
+        ]
+        mocker.patch(
+            "workflow.query_executor.WorkflowStorageFactory.get_transcript_store",
+            return_value=mock_store,
+        )
+        result = await _load_conversation_context("conv-1")
+        assert "conversation_history" in result
+        assert len(result["conversation_history"]) == 2
+        assert result["conversation_history"][0]["role"] == "user"
+
+    @pytest.mark.asyncio
+    async def test_skips_invalid_messages(self, mocker: MockerFixture) -> None:
+        """Skips messages missing role or content fields."""
+        mock_store = mocker.AsyncMock()
+        mock_store.load_recent_turns.return_value = [
+            {
+                "messages": [
+                    {"role": "user", "content": "Valid"},
+                    {"bad_field": "no role or content"},
+                    {"role": "assistant"},
+                ]
+            }
+        ]
+        mocker.patch(
+            "workflow.query_executor.WorkflowStorageFactory.get_transcript_store",
+            return_value=mock_store,
+        )
+        result = await _load_conversation_context("conv-1")
+        assert len(result["conversation_history"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_handles_store_errors_gracefully(self, mocker: MockerFixture) -> None:
+        """Returns empty dict on store errors."""
+        mock_store = mocker.AsyncMock()
+        mock_store.load_recent_turns.side_effect = Exception("db error")
+        mocker.patch(
+            "workflow.query_executor.WorkflowStorageFactory.get_transcript_store",
+            return_value=mock_store,
+        )
+        result = await _load_conversation_context("conv-1")
+        assert result == {}
+
+
+class TestSaveConversationTurn:
+    """Tests for _save_conversation_turn."""
+
+    @pytest.mark.asyncio
+    async def test_saves_turn_to_store(self, mocker: MockerFixture) -> None:
+        """Saves user prompt and assistant response as a turn."""
+        mock_store = mocker.AsyncMock()
+        mock_store.list_steps.return_value = ["turn-0"]
+        mocker.patch(
+            "workflow.query_executor.WorkflowStorageFactory.get_transcript_store",
+            return_value=mock_store,
+        )
+
+        mock_result = mocker.MagicMock()
+        mock_result.output = {"response": "Hello back"}
+        mock_result.input_tokens = 10
+        mock_result.output_tokens = 5
+        mock_result.duration_ms = 500
+
+        await _save_conversation_turn("conv-1", "Hello", mock_result)
+
+        mock_store.save.assert_called_once()
+        call_kwargs = mock_store.save.call_args[1]
+        assert call_kwargs["workflow_id"] == "conv-1"
+        assert call_kwargs["step_name"].startswith("turn-")
+        assert len(call_kwargs["messages"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_skips_when_store_unavailable(self, mocker: MockerFixture) -> None:
+        """Does nothing when TranscriptStore is not initialized."""
+        mocker.patch(
+            "workflow.query_executor.WorkflowStorageFactory.get_transcript_store",
+            side_effect=RuntimeError("not initialized"),
+        )
+        mock_result = mocker.MagicMock()
+        await _save_conversation_turn("conv-1", "Hello", mock_result)
+
+    @pytest.mark.asyncio
+    async def test_handles_save_errors_gracefully(self, mocker: MockerFixture) -> None:
+        """Logs warning on save failure, doesn't raise."""
+        mock_store = mocker.AsyncMock()
+        mock_store.list_steps.return_value = []
+        mock_store.save.side_effect = Exception("db write failed")
+        mocker.patch(
+            "workflow.query_executor.WorkflowStorageFactory.get_transcript_store",
+            return_value=mock_store,
+        )
+
+        mock_result = mocker.MagicMock()
+        mock_result.output = {"response": "test"}
+        mock_result.input_tokens = 10
+        mock_result.output_tokens = 5
+        mock_result.duration_ms = 100
+
+        await _save_conversation_turn("conv-1", "Hello", mock_result)
 
 
 class TestStreamQueryViaDirectExecutor:

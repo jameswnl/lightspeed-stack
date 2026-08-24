@@ -17,10 +17,12 @@ from cloud_agents.workflow.executor.step.base import (
     StepResult,
     StreamEvent,
 )
+from cloud_agents.workflow.executor.step.conversation import ConversationMessage
 from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 
 from configuration import configuration
 from log import get_logger
+from workflow.storage import WorkflowStorageFactory
 
 logger = get_logger(__name__)
 
@@ -148,7 +150,98 @@ def _validate_and_build_step_input(  # pylint: disable=too-many-arguments
     return step_input, provider_name, model_name
 
 
-async def execute_query_via_direct_executor(
+async def _load_conversation_context(
+    conversation_id: str,
+) -> dict[str, Any]:
+    """Load prior conversation turns as context for the executor.
+
+    Parameters:
+        conversation_id: Conversation/workflow ID to load turns from.
+
+    Returns:
+        Context dict with prior turns, or empty dict if unavailable.
+    """
+    try:
+        store = WorkflowStorageFactory.get_transcript_store()
+    except RuntimeError:
+        return {}
+
+    try:
+        turns = await store.load_recent_turns(conversation_id, limit=20)
+        if not turns:
+            return {}
+
+        history: list[dict[str, Any]] = []
+        for turn in turns:
+            messages = turn.get("messages", [])
+            for msg in messages:
+                entry = (
+                    msg
+                    if isinstance(msg, dict)
+                    else (msg.to_dict() if hasattr(msg, "to_dict") else None)
+                )
+                if entry and "role" in entry and "content" in entry:
+                    history.append(entry)
+
+        return {"conversation_history": history} if history else {}
+    except Exception as exc:
+        logger.warning("Failed to load conversation context: %s", exc)
+        return {}
+
+
+async def _save_conversation_turn(
+    conversation_id: str,
+    prompt: str,
+    result: StepResult,
+) -> None:
+    """Save a conversation turn to the transcript store.
+
+    Parameters:
+        conversation_id: Conversation/workflow ID.
+        prompt: User's prompt for this turn.
+        result: Executor result for this turn.
+    """
+    try:
+        store = WorkflowStorageFactory.get_transcript_store()
+    except RuntimeError:
+        return
+
+    from cloud_agents.workflow.core.models import StepTranscript, TranscriptEvent
+
+    response_text = ""
+    if isinstance(result.output, dict):
+        response_text = result.output.get("response", str(result.output))
+    elif result.output is not None:
+        response_text = str(result.output)
+
+    messages = [
+        ConversationMessage(role="user", content=prompt),
+        ConversationMessage(role="assistant", content=response_text),
+    ]
+
+    import uuid
+
+    turn_id = f"turn-{uuid.uuid4().hex[:8]}"
+    transcript = StepTranscript(
+        step_name=turn_id,
+        events=[TranscriptEvent(ts="", type="result", data={"text": response_text})],
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        duration_ms=result.duration_ms,
+    )
+
+    try:
+        await store.save(
+            workflow_id=conversation_id,
+            step_name=turn_id,
+            transcript=transcript,
+            messages=messages,
+        )
+    except Exception as exc:
+        logger.warning("Failed to save conversation turn: %s", exc)
+
+
+async def execute_query_via_direct_executor(  # pylint: disable=too-many-arguments
     *,
     prompt: str,
     model: Optional[str] = None,
@@ -157,6 +250,7 @@ async def execute_query_via_direct_executor(
     mcp_server_names: Optional[list[str]] = None,
     output_schema: Optional[dict[str, Any]] = None,
     context: Optional[dict[str, Any]] = None,
+    conversation_id: Optional[str] = None,
     user_id: str = "",
     username: str = "",
 ) -> StepResult:
@@ -170,6 +264,7 @@ async def execute_query_via_direct_executor(
         mcp_server_names: MCP server names to include (None = all).
         output_schema: Optional structured output schema.
         context: Prior conversation context.
+        conversation_id: Optional conversation ID for multi-turn.
         user_id: User identifier for audit logging.
         username: Username for audit logging.
 
@@ -179,6 +274,11 @@ async def execute_query_via_direct_executor(
     Raises:
         ValueError: On validation failure.
     """
+    merged_context = dict(context or {})
+    if conversation_id:
+        conv_context = await _load_conversation_context(conversation_id)
+        merged_context.update(conv_context)
+
     step_input, provider_name, model_name = _validate_and_build_step_input(
         prompt=prompt,
         model=model,
@@ -186,9 +286,10 @@ async def execute_query_via_direct_executor(
         instructions=instructions,
         mcp_server_names=mcp_server_names,
         output_schema=output_schema,
-        context=context,
+        context=merged_context,
         step_name="query",
         user_id=user_id,
+        session_id=conversation_id or "",
     )
 
     executor = get_step_executor(_QUERY_STEP_DEF, spawner=None)
@@ -212,6 +313,9 @@ async def execute_query_via_direct_executor(
         result.input_tokens,
         result.output_tokens,
     )
+
+    if conversation_id and result.status == "completed":
+        await _save_conversation_turn(conversation_id, prompt, result)
 
     return result
 

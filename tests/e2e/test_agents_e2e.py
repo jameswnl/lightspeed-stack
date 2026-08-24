@@ -249,6 +249,187 @@ class TestQueryDirectE2E:
         assert complete_events[0].result.output is not None
 
 
+class TestQueryDirectResponseShape:
+    """Verify /query/direct response matches /query contract."""
+
+    @pytest.mark.asyncio
+    async def test_response_has_all_query_fields(self, e2e_config: Any) -> None:
+        """Response includes all fields from QueryResponse."""
+        from app.endpoints.query_direct import QueryDirectRequest, query_direct_handler
+
+        body = QueryDirectRequest(
+            query="Say hi.",
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+
+        result = await query_direct_handler.__wrapped__(_make_request(), body, _AUTH)
+
+        expected_fields = {
+            "conversation_id",
+            "response",
+            "truncated",
+            "input_tokens",
+            "output_tokens",
+            "available_quotas",
+            "tool_calls",
+            "tool_results",
+            "rag_chunks",
+            "referenced_documents",
+            "request_id",
+            "interrupted",
+        }
+        assert expected_fields.issubset(result.keys())
+        assert isinstance(result["response"], str)
+        assert len(result["response"]) > 0
+        assert isinstance(result["input_tokens"], int)
+        assert isinstance(result["output_tokens"], int)
+        assert result["truncated"] is False
+        assert result["interrupted"] is False
+
+    @pytest.mark.asyncio
+    async def test_response_types_match_query(self, e2e_config: Any) -> None:
+        """Response field types match what /query returns."""
+        from app.endpoints.query_direct import QueryDirectRequest, query_direct_handler
+
+        body = QueryDirectRequest(
+            query="What is Python?",
+            provider="openai",
+            model="gpt-4o-mini",
+            system_prompt="One sentence max.",
+        )
+
+        result = await query_direct_handler.__wrapped__(_make_request(), body, _AUTH)
+
+        assert isinstance(result["tool_calls"], list)
+        assert isinstance(result["tool_results"], list)
+        assert isinstance(result["rag_chunks"], list)
+        assert isinstance(result["referenced_documents"], list)
+        assert isinstance(result["available_quotas"], dict)
+
+
+class TestErrorHandlingE2E:
+    """E2E tests for error paths."""
+
+    @pytest.mark.asyncio
+    async def test_missing_provider_returns_400(self, e2e_config: Any) -> None:
+        """Missing provider and model with no defaults returns 400."""
+        from fastapi import HTTPException
+
+        from app.endpoints.query_direct import QueryDirectRequest, query_direct_handler
+
+        body = QueryDirectRequest(query="Hello")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await query_direct_handler.__wrapped__(_make_request(), body, _AUTH)
+        assert exc_info.value.status_code == 400
+        assert "Provider and model" in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_prompt_too_long_returns_400(self, e2e_config: Any) -> None:
+        """Oversized prompt returns 400."""
+        from fastapi import HTTPException
+
+        from app.endpoints.query_direct import QueryDirectRequest, query_direct_handler
+
+        body = QueryDirectRequest(
+            query="x" * 200_000,
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await query_direct_handler.__wrapped__(_make_request(), body, _AUTH)
+        assert exc_info.value.status_code == 400
+        assert "maximum length" in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_unknown_mcp_server_returns_400(self, e2e_config: Any) -> None:
+        """Unknown MCP server name returns 400."""
+        from fastapi import HTTPException
+
+        from app.endpoints.query_direct import QueryDirectRequest, query_direct_handler
+
+        body = QueryDirectRequest(
+            query="Hello",
+            provider="openai",
+            model="gpt-4o-mini",
+            mcp_servers=["nonexistent-server"],
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await query_direct_handler.__wrapped__(_make_request(), body, _AUTH)
+        assert exc_info.value.status_code == 400
+        assert "Unknown MCP server" in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_agent_run_missing_prompt_returns_422(self, e2e_config: Any) -> None:
+        """Missing required 'prompt' field returns 422."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            AgentRunRequest(provider="openai", model="gpt-4o-mini")  # type: ignore[call-arg]
+
+
+class TestStreamingE2E:
+    """E2E tests for streaming behavior."""
+
+    @pytest.mark.asyncio
+    async def test_stream_complete_event_has_output(self, e2e_config: Any) -> None:
+        """Complete event from stream has output and metrics."""
+        from workflow.query_executor import stream_query_via_direct_executor
+
+        events = []
+        async for event in stream_query_via_direct_executor(
+            prompt="What is 1+1? Reply with just the number.",
+            provider="openai",
+            model="gpt-4o-mini",
+        ):
+            events.append(event)
+
+        complete = [e for e in events if e.type == "complete"]
+        assert len(complete) == 1
+        assert complete[0].result.status == "completed"
+        assert complete[0].result.input_tokens > 0
+        assert complete[0].result.output_tokens > 0
+        assert complete[0].result.duration_ms > 0
+        assert "2" in str(complete[0].result.output)
+
+    @pytest.mark.asyncio
+    async def test_stream_validation_error_raised_before_streaming(
+        self, e2e_config: Any
+    ) -> None:
+        """Validation errors raise before any events are yielded."""
+        from workflow.query_executor import stream_query_via_direct_executor
+
+        with pytest.raises(ValueError, match="maximum length"):
+            async for _ in stream_query_via_direct_executor(
+                prompt="x" * 200_000,
+                provider="openai",
+                model="gpt-4o-mini",
+            ):
+                pass
+
+
+class TestMultiModelE2E:
+    """E2E tests verifying different model configurations."""
+
+    @pytest.mark.asyncio
+    async def test_different_model_produces_response(self, e2e_config: Any) -> None:
+        """A different model still produces a valid response."""
+        body = AgentRunRequest(
+            prompt="What color is the sky? One word.",
+            provider="openai",
+            model="gpt-4o-mini",
+            instructions="Reply with exactly one word.",
+        )
+
+        result = await run_agent_handler.__wrapped__(_make_request(), body, _AUTH)
+
+        assert result["status"] == "completed"
+        assert "blue" in str(result["output"]).lower()
+
+
 class TestWorkflowDefinitionCompatibility:
     """Test that cloud-agents workflow definitions parse correctly."""
 

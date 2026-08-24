@@ -175,10 +175,13 @@ async def _load_conversation_context(
         for turn in turns:
             messages = turn.get("messages", [])
             for msg in messages:
-                if isinstance(msg, dict):
-                    history.append(msg)
-                elif hasattr(msg, "to_dict"):
-                    history.append(msg.to_dict())
+                entry = (
+                    msg
+                    if isinstance(msg, dict)
+                    else (msg.to_dict() if hasattr(msg, "to_dict") else None)
+                )
+                if entry and "role" in entry and "content" in entry:
+                    history.append(entry)
 
         return {"conversation_history": history} if history else {}
     except Exception as exc:
@@ -216,8 +219,11 @@ async def _save_conversation_turn(
         ConversationMessage(role="assistant", content=response_text),
     ]
 
+    import uuid
+
+    turn_id = f"turn-{uuid.uuid4().hex[:8]}"
     transcript = StepTranscript(
-        step_name=f"turn-{conversation_id}",
+        step_name=turn_id,
         events=[TranscriptEvent(ts="", type="result", data={"text": response_text})],
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
@@ -227,7 +233,7 @@ async def _save_conversation_turn(
     try:
         await store.save(
             workflow_id=conversation_id,
-            step_name=f"turn-{len(await store.list_steps(conversation_id))}",
+            step_name=turn_id,
             transcript=transcript,
             messages=messages,
         )

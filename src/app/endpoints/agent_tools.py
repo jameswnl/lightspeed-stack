@@ -2,7 +2,7 @@
 
 from typing import Annotated, Any
 
-from cloud_agents.workflow.executor.step.tools import list_tools
+from cloud_agents.workflow.executor.step.tools import get_tools, list_tools
 from fastapi import APIRouter, Depends, Request
 
 from authentication import get_auth_dependency
@@ -37,8 +37,18 @@ async def list_agent_tools_handler(
     _ = auth
 
     tool_names = list_tools()
+    tool_defs = get_tools(tool_names) if tool_names else []
+
+    tools = []
+    for tool_def in tool_defs:
+        tools.append(
+            {
+                "name": tool_def.name,
+                "description": tool_def.description or "",
+            }
+        )
 
     return {
-        "tools": [{"name": name} for name in tool_names],
-        "count": len(tool_names),
+        "tools": tools,
+        "count": len(tools),
     }

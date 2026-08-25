@@ -55,15 +55,13 @@ async def run_agent_handler(
 
     check_configuration_loaded(configuration)
 
-    step_def = {
-        "name": "agent-run",
-        "spawn": body.spawn,
-        "prompt": body.prompt,
-    }
-
+    inference = configuration.inference
     spawner = None
     sandbox_image = None
-    provider: dict[str, Any] = {"name": body.provider or "", "model": body.model or ""}
+    provider: dict[str, Any] = {
+        "name": body.provider or inference.default_provider or "",
+        "model": body.model or inference.default_model or "",
+    }
     if body.spawn == "ephemeral":
         spawner_config = configuration.spawner_configuration
         if not spawner_config:
@@ -73,11 +71,14 @@ async def run_agent_handler(
             )
         spawner = build_spawner(spawner_config)
         sandbox_image = body.sandbox_image or spawner_config.sandbox_image
-        cred_secret = credentials_secret_for(body.provider or "")
+        cred_secret = credentials_secret_for(provider["name"])
         if cred_secret:
             provider["credentials_secret"] = cred_secret
 
-    executor = get_step_executor(step_def, spawner=spawner)
+    executor = get_step_executor(
+        {"name": "agent-run", "spawn": body.spawn, "prompt": body.prompt},
+        spawner=spawner,
+    )
 
     user_id, username, _, _ = auth
 

@@ -84,6 +84,7 @@ class RunWorkflowRequest(BaseModel):
         provider: Default LLM provider config for all steps.
         sandbox_image: Default sandbox image for ephemeral steps.
         approval_policy: Optional approval policy.
+        session_id: Optional caller-provided ID grouping related workflow runs.
     """
 
     definition: dict[str, Any] = Field(
@@ -104,6 +105,11 @@ class RunWorkflowRequest(BaseModel):
     approval_policy: Optional[dict[str, Any]] = Field(
         None,
         description="Approval policy for human-approval steps.",
+    )
+
+    session_id: Optional[str] = Field(
+        None,
+        description="Caller-provided ID grouping related workflow runs.",
     )
 
 

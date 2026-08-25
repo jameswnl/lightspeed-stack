@@ -84,6 +84,7 @@ async def start_workflow_handler(
         "provider": provider,
         "sandbox_image": body.sandbox_image or "lightspeed-agentic-sandbox:latest",
         "approval_policy": body.approval_policy,
+        "session_id": body.session_id,
         "authz_context": {
             "user_id": user_id,
             "username": username,

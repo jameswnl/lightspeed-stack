@@ -109,6 +109,82 @@ class TestStartWorkflow:
         assert result["status"] == "running"
         mock_executor.start.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_forwards_session_id(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """Forwards a caller-supplied session_id into the executor's input."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {
+                    "steps": [
+                        {
+                            "name": "analyze",
+                            "type": "agent",
+                            "output_key": "analysis",
+                            "spawn": "none",
+                            "prompt": "Analyze this",
+                        }
+                    ]
+                },
+            },
+            session_id="ses-abc123",
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        mock_executor.start.assert_called_once()
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["session_id"] == "ses-abc123"
+
+    @pytest.mark.asyncio
+    async def test_session_id_omitted_forwards_none(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """Omitting session_id forwards None rather than a missing key."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {
+                    "steps": [
+                        {
+                            "name": "analyze",
+                            "type": "agent",
+                            "output_key": "analysis",
+                            "spawn": "none",
+                            "prompt": "Analyze this",
+                        }
+                    ]
+                },
+            },
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["session_id"] is None
+
 
 class TestGetWorkflow:
     """Tests for get_workflow_handler."""

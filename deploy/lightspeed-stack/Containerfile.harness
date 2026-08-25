@@ -1,0 +1,30 @@
+# vim: set filetype=dockerfile
+#
+# Harness-only overlay: adds the lightspeed-cloud-agents editable dependency
+# on top of the base lightspeed-stack image, so the workflow/agents endpoints
+# (spawn:ephemeral, OpenShellSpawner, etc.) work in a deployed container.
+#
+# Not used for the official product image -- that one (Containerfile) has no
+# cloud_agents dependency at all, since these endpoints are harness/PoC-only.
+#
+# Build (from the lightspeed-stack repo root, base image already built):
+#   podman build \
+#     --build-context cloud_agents=~/ws/lightspeed-cloud-agents \
+#     -f deploy/lightspeed-stack/Containerfile.harness \
+#     -t localhost/lightspeed-stack:kind-test-harness .
+
+ARG BASE_IMAGE=localhost/lightspeed-stack:kind-test
+
+FROM ${BASE_IMAGE}
+
+USER root
+
+COPY --from=cloud_agents src /opt/lightspeed-cloud-agents/src
+COPY --from=cloud_agents pyproject.toml README.md LICENSE /opt/lightspeed-cloud-agents/
+
+RUN /app-root/.venv/bin/python3.12 -m ensurepip && \
+    /app-root/.venv/bin/python3.12 -m pip install --no-cache-dir \
+    "/opt/lightspeed-cloud-agents[local,kubernetes,openshell]" && \
+    rm -rf /opt/lightspeed-cloud-agents
+
+USER 1001

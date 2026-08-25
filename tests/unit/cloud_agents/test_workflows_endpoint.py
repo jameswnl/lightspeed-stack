@@ -67,6 +67,46 @@ class TestGetExecutor:
             _get_executor()
         assert exc_info.value.status_code == 503
 
+    def test_passes_real_spawner_when_configured(
+        self, mocker: MockerFixture, mock_config: Any
+    ) -> None:
+        """A configured spawner is built and forwarded to create_workflow_runner.
+
+        Regression test: _get_executor() used to call create_workflow_runner()
+        with no spawner argument at all, silently no-opping ephemeral spawn
+        for workflow steps regardless of spawner_configuration.
+        """
+        spawner_config = mocker.MagicMock()
+        mock_config.spawner_configuration = spawner_config
+
+        fake_spawner = mocker.MagicMock()
+        mock_build_spawner = mocker.patch(
+            "app.endpoints.workflows.build_spawner", return_value=fake_spawner
+        )
+        mock_create_runner = mocker.patch(
+            "workflow.executor_factory.create_workflow_runner"
+        )
+
+        _get_executor()
+
+        mock_build_spawner.assert_called_once_with(spawner_config)
+        mock_create_runner.assert_called_once_with(spawner=fake_spawner)
+
+    def test_no_spawner_config_passes_none(
+        self, mocker: MockerFixture, mock_config: Any
+    ) -> None:
+        """Without a spawner config, create_workflow_runner gets no spawner."""
+        mock_config.spawner_configuration = None
+        mock_build_spawner = mocker.patch("app.endpoints.workflows.build_spawner")
+        mock_create_runner = mocker.patch(
+            "workflow.executor_factory.create_workflow_runner"
+        )
+
+        _get_executor()
+
+        mock_build_spawner.assert_not_called()
+        mock_create_runner.assert_called_once_with(spawner=None)
+
 
 class TestStartWorkflow:
     """Tests for start_workflow_handler."""

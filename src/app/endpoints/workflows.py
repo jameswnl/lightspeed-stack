@@ -14,6 +14,7 @@ from log import get_logger
 from models.api.requests.agents import ApproveWorkflowRequest, RunWorkflowRequest
 from models.config import Action
 from utils.endpoints import check_configuration_loaded
+from workflow.spawner_factory import build_spawner
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["workflows"])
@@ -43,7 +44,9 @@ def _get_executor() -> Any:
 
     from workflow.executor_factory import create_workflow_runner
 
-    _executor = create_workflow_runner()
+    spawner_config = configuration.spawner_configuration
+    spawner = build_spawner(spawner_config) if spawner_config else None
+    _executor = create_workflow_runner(spawner=spawner)
     return _executor
 
 

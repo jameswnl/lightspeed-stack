@@ -27,8 +27,14 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 
-import httpx
 import pytest
+
+from tests.e2e.cloud_agents.conftest import (
+    OTLP_ENDPOINT,
+    SERVICE_NAME,
+    check_jaeger_available,
+    query_jaeger_traces,
+)
 
 pytestmark = [
     pytest.mark.skipif(
@@ -36,10 +42,6 @@ pytestmark = [
         reason="OPENAI_API_KEY not set",
     ),
 ]
-
-JAEGER_QUERY_URL = os.environ.get("JAEGER_QUERY_URL", "http://localhost:16686")
-OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-SERVICE_NAME = "lightspeed-stack-e2e-test"
 
 _PG_HOST = os.environ.get("WORKFLOW_PG_HOST", "localhost")
 _PG_PORT = int(os.environ.get("WORKFLOW_PG_PORT", "5432"))
@@ -105,55 +107,13 @@ def tracer_fixture() -> Any:
     provider.shutdown()
 
 
-async def _query_jaeger_traces(
-    service: str, operation: str = "", limit: int = 5
-) -> list[dict[str, Any]]:
-    """Query Jaeger for recent traces.
-
-    Parameters:
-        service: Service name to query.
-        operation: Optional operation name filter.
-        limit: Max traces to return.
-
-    Returns:
-        List of trace dicts from Jaeger.
-    """
-    params: dict[str, Any] = {
-        "service": service,
-        "limit": limit,
-        "lookback": "1h",
-    }
-    if operation:
-        params["operation"] = operation
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{JAEGER_QUERY_URL}/api/traces",
-            params=params,
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("data", [])
-
-
-async def _check_jaeger_available() -> bool:
-    """Check if Jaeger query API is reachable."""
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{JAEGER_QUERY_URL}/api/services", timeout=5)
-            return resp.status_code == 200
-    except (httpx.ConnectError, httpx.TimeoutException):
-        return False
-
-
 class TestOtelTracingE2E:
     """E2E tests verifying OTEL traces reach Jaeger."""
 
     @pytest.mark.asyncio
     async def test_query_direct_creates_trace(self, tracer: Any) -> None:
         """A /query/direct call creates a trace visible in Jaeger."""
-        if not await _check_jaeger_available():
+        if not await check_jaeger_available():
             pytest.skip("Jaeger not available")
 
         from configuration import configuration
@@ -194,7 +154,7 @@ class TestOtelTracingE2E:
 
         await asyncio.sleep(2)
 
-        traces = await _query_jaeger_traces(
+        traces = await query_jaeger_traces(
             service=SERVICE_NAME,
             operation="e2e.query_direct",
         )
@@ -231,7 +191,7 @@ class TestOtelTracingE2E:
     @pytest.mark.asyncio
     async def test_trace_includes_token_metrics(self, tracer: Any) -> None:
         """Trace span includes token usage as attributes."""
-        if not await _check_jaeger_available():
+        if not await check_jaeger_available():
             pytest.skip("Jaeger not available")
 
         from workflow.query_executor import execute_query_via_direct_executor
@@ -249,7 +209,7 @@ class TestOtelTracingE2E:
 
         await asyncio.sleep(2)
 
-        traces = await _query_jaeger_traces(
+        traces = await query_jaeger_traces(
             service=SERVICE_NAME,
             operation="e2e.token_metrics",
         )

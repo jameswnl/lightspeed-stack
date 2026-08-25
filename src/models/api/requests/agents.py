@@ -41,7 +41,8 @@ class AgentRunRequest(BaseModel):
 
     provider: Optional[str] = Field(
         None,
-        description="Provider name. Used to prefix model if no slash present.",
+        description="Provider name. Used to prefix model if no slash present. "
+        "Falls back to inference.default_provider.",
     )
 
     spawn: Literal["none", "ephemeral"] = Field(

@@ -185,6 +185,49 @@ class TestStartWorkflow:
         workflow_input = mock_executor.start.call_args[0][0]
         assert workflow_input["session_id"] is None
 
+    @pytest.mark.asyncio
+    async def test_forwards_user_id(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """Forwards the authenticated user_id as a top-level input key.
+
+        StepMetadata.user_id is populated from input.get("user_id") in
+        cloud-agents (graph_translator.py) -- previously only nested under
+        authz_context, which cloud-agents doesn't read for this purpose.
+        """
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {
+                    "steps": [
+                        {
+                            "name": "analyze",
+                            "type": "agent",
+                            "output_key": "analysis",
+                            "spawn": "none",
+                            "prompt": "Analyze this",
+                        }
+                    ]
+                },
+            },
+        )
+        auth = ("user-42", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["user_id"] == "user-42"
+        assert workflow_input["authz_context"]["user_id"] == "user-42"
+
 
 class TestGetWorkflow:
     """Tests for get_workflow_handler."""

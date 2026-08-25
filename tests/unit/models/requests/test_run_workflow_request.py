@@ -25,3 +25,11 @@ class TestRunWorkflowRequest:
             session_id="ses-abc123",
         )
         assert req.session_id == "ses-abc123"
+
+    def test_empty_session_id_normalizes_to_none(self) -> None:
+        """An empty-string session_id is treated the same as omitted."""
+        req = RunWorkflowRequest(
+            definition=_MINIMAL_DEFINITION,
+            session_id="",
+        )
+        assert req.session_id is None

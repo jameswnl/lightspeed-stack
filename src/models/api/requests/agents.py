@@ -2,7 +2,7 @@
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AgentRunRequest(BaseModel):
@@ -111,6 +111,19 @@ class RunWorkflowRequest(BaseModel):
         None,
         description="Caller-provided ID grouping related workflow runs.",
     )
+
+    @field_validator("session_id")
+    @classmethod
+    def normalize_session_id(cls, value: Optional[str]) -> Optional[str]:
+        """Treat an empty string session_id the same as omitted.
+
+        Parameters:
+            value: Raw session_id from the request; may be None or empty.
+
+        Returns:
+            None if the value is empty, otherwise the original value.
+        """
+        return value or None
 
 
 class ApproveWorkflowRequest(BaseModel):

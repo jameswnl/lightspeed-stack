@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cloud Agents Integration — Lightspeed Stack</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; }
+h1 { text-align: center; padding: 20px 0 4px; font-size: 1.5em; color: #58a6ff; }
+h2 { text-align: center; padding: 4px 0 12px; font-size: 0.95em; color: #8b949e; font-weight: normal; max-width: 950px; margin: 0 auto; }
+.scene { max-width: 1200px; margin: 0 auto; padding: 10px 20px; }
+svg { width: 100%; height: auto; display: block; }
+
+.comp rect { rx: 8; ry: 8; stroke-width: 2; transition: filter 0.3s, opacity 0.5s; }
+.comp:hover rect { filter: brightness(1.2); }
+.lbl { font-size: 12px; font-weight: 600; fill: #f0f6fc; }
+.desc { font-size: 9.5px; fill: #8b949e; }
+.param { font-size: 9px; fill: #d2a8ff; font-family: 'SFMono-Regular', monospace; }
+
+.boundary { fill: none; stroke-dasharray: 7 4; stroke-width: 1.4; rx: 10; ry: 10; }
+.blbl { font-size: 10px; font-weight: 600; letter-spacing: 0.4px; }
+
+.flow { stroke-dasharray: 6 4; stroke-width: 2; opacity: 0; transition: opacity 0.3s; }
+.flow.on { opacity: 1; animation: dash 0.5s linear infinite; }
+@keyframes dash { to { stroke-dashoffset: -10; } }
+
+@keyframes glow { 0%,100% { filter: drop-shadow(0 0 3px #238636); } 50% { filter: drop-shadow(0 0 10px #3fb950); } }
+.eph rect { animation: glow 1.4s ease-in-out infinite; }
+@keyframes glowpurple { 0%,100% { filter: drop-shadow(0 0 3px #a371f7); } 50% { filter: drop-shadow(0 0 10px #d2a8ff); } }
+.hardened rect { animation: glowpurple 1.4s ease-in-out infinite; }
+
+.step-bar { fill: #161b22; stroke: #30363d; stroke-width: 1; rx: 6; }
+.step-n { font-size: 12px; fill: #58a6ff; font-weight: 700; }
+.step-t { font-size: 11px; fill: #c9d1d9; }
+
+/* Tabs */
+.tabs { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; padding: 16px 10px 0; max-width: 1200px; margin: 0 auto; }
+.tabs button { background: #21262d; color: #8b949e; border: 1px solid #30363d; padding: 8px 16px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 13px; font-weight: 600; border-bottom: none; position: relative; top: 1px; white-space: nowrap; }
+.tabs button:hover { background: #30363d; color: #c9d1d9; }
+.tabs button.active { background: #0d1117; color: #58a6ff; border-color: #58a6ff; border-bottom: 1px solid #0d1117; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.tab-divider { max-width: 1200px; margin: 0 auto; border-top: 1px solid #58a6ff; }
+@media (max-width: 700px) { .tabs button { font-size: 11px; padding: 6px 10px; } }
+
+.controls { text-align: center; padding: 12px; }
+.controls button { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 7px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; margin: 0 3px; }
+.controls button:hover { background: #30363d; }
+.controls button.go { background: #238636; border-color: #238636; color: #fff; }
+.controls button.go:hover { background: #2ea043; }
+.controls button:disabled { opacity: 0.35; cursor: default; }
+.info { color: #8b949e; font-size: 12px; margin-left: 10px; }
+
+.log { max-width: 1200px; margin: 0 auto; padding: 0 20px 30px; }
+.logc { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; font-family: 'SFMono-Regular', monospace; font-size: 11.5px; line-height: 1.7; max-height: 280px; overflow-y: auto; white-space: pre-wrap; }
+.ls { color: #58a6ff; } .ld { color: #3fb950; } .lw { color: #d29922; } .lp { color: #d2a8ff; } .le { color: #f85149; }
+
+.note { max-width: 1000px; margin: 24px auto 0; padding: 12px 18px; background: #1c2333; border-left: 3px solid #58a6ff; border-radius: 4px; font-size: 12.5px; color: #8b949e; line-height: 1.6; }
+.note b { color: #c9d1d9; }
+.note code { color: #d2a8ff; }
+
+.static-content { max-width: 1000px; margin: 10px auto 0; padding: 0 20px 10px; }
+.banner { background: #0d2818; border: 1px solid #238636; border-left: 4px solid #3fb950; border-radius: 6px; padding: 16px 20px; font-size: 14px; color: #c9d1d9; line-height: 1.6; text-align: center; }
+.banner b { color: #3fb950; }
+</style>
+</head>
+<body>
+
+<h1>Cloud Agents Integration — Lightspeed Stack</h1>
+
+<div class="tabs">
+  <button class="active" onclick="switchTab('growth')">Growth Strategy</button>
+  <button onclick="switchTab('blocks')">Building Blocks</button>
+  <button onclick="switchTab('none')">1. Agent — In-Process</button>
+  <button onclick="switchTab('eph')">2. Agent — OpenShell</button>
+  <button onclick="switchTab('wf')">3. Workflow — OpenShell</button>
+</div>
+<div class="tab-divider"></div>
+
+<!-- ============================================================ -->
+<!-- TAB 0: GROWTH STRATEGY                                        -->
+<!-- ============================================================ -->
+<div id="tab-growth" class="tab-content active">
+<h2>Two independent growth axes on the same integration — go deeper on capability, go wider on isolation. Teams start at the top-left corner with zero infra, and move outward only as their needs mature.</h2>
+
+<div class="scene">
+<svg viewBox="0 0 1140 520" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <pattern id="ggrid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0L0 0 0 20" fill="none" stroke="#161b22" stroke-width="0.5"/></pattern>
+  <marker id="gr-a1" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#58a6ff"/></marker>
+  <marker id="gr-a2" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#d29922"/></marker>
+</defs>
+<rect width="1140" height="520" fill="url(#ggrid)"/>
+
+<rect class="boundary" x="270" y="40" width="700" height="110" stroke="#58a6ff" opacity="0.3"/>
+<text x="285" y="57" class="blbl" fill="#58a6ff" opacity="0.6">Graph Workflow</text>
+
+<g class="comp"><rect x="40" y="60" width="200" height="70" fill="#1c2333" stroke="#f0f6fc"/><text x="140" y="88" text-anchor="middle" class="lbl">lightspeed-stack</text><text x="140" y="104" text-anchor="middle" class="desc">today — start here, no infra</text></g>
+
+<g class="comp"><rect x="290" y="60" width="180" height="70" fill="#0d2818" stroke="#3fb950"/><text x="380" y="85" text-anchor="middle" class="lbl">in-process</text><text x="380" y="101" text-anchor="middle" class="desc">spawn: none — Tab 1</text><text x="380" y="114" text-anchor="middle" class="desc">zero infra</text></g>
+
+<g class="comp"><rect x="510" y="60" width="180" height="70" fill="#2d2000" stroke="#d29922"/><text x="600" y="85" text-anchor="middle" class="lbl">sub-process</text><text x="600" y="101" text-anchor="middle" class="desc">spawn: local</text><text x="600" y="114" text-anchor="middle" class="desc">crash isolation, no cluster</text></g>
+
+<g class="comp"><rect x="730" y="60" width="220" height="70" fill="#1c1030" stroke="#a371f7"/><text x="840" y="85" text-anchor="middle" class="lbl" fill="#d2a8ff">sandbox (OpenShell)</text><text x="840" y="101" text-anchor="middle" class="desc">spawn: ephemeral — Tabs 2–3</text><text x="840" y="114" text-anchor="middle" class="desc">production hardening</text></g>
+
+<line x1="240" y1="95" x2="285" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#gr-a1)"/>
+<line x1="470" y1="95" x2="505" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#gr-a1)"/>
+<line x1="690" y1="95" x2="725" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#gr-a1)"/>
+<line x1="955" y1="95" x2="1110" y2="95" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#gr-a1)"/>
+
+<text x="640" y="180" text-anchor="middle" class="blbl" fill="#58a6ff">WIDTH — workflow engine isolation (Tabs 1–3)</text>
+
+<g class="comp"><rect x="40" y="170" width="200" height="70" fill="#2d2000" stroke="#d29922"/><text x="140" y="198" text-anchor="middle" class="lbl">Skills + custom tools</text><text x="140" y="214" text-anchor="middle" class="desc">SKILL.md, @step_tool, MCP</text></g>
+
+<g class="comp"><rect x="40" y="280" width="200" height="70" fill="#2d2000" stroke="#d29922"/><text x="140" y="308" text-anchor="middle" class="lbl">Human-in-the-loop</text><text x="140" y="324" text-anchor="middle" class="desc">approval gates, escalation</text></g>
+
+<g class="comp"><rect x="40" y="390" width="200" height="70" fill="#2d2000" stroke="#d29922" opacity="0.7"/><text x="140" y="418" text-anchor="middle" class="lbl">Guardrails · Quota · RAG</text><text x="140" y="434" text-anchor="middle" class="desc">planned depth</text></g>
+
+<line x1="140" y1="130" x2="140" y2="165" stroke="#d29922" stroke-width="1.5" marker-end="url(#gr-a2)"/>
+<line x1="140" y1="240" x2="140" y2="275" stroke="#d29922" stroke-width="1.5" marker-end="url(#gr-a2)"/>
+<line x1="140" y1="350" x2="140" y2="385" stroke="#d29922" stroke-width="1.5" marker-end="url(#gr-a2)"/>
+
+<text x="140" y="490" text-anchor="middle" class="blbl" fill="#d29922">DEPTH — capability within the harness</text>
+</svg>
+</div>
+
+<div class="static-content">
+<div class="banner">Build on the <b>same lightspeed-stack</b> integration at every point on both axes — teams can start experimenting with zero infra, then grow deeper (capability) and wider (isolation) independently, without rewriting a single workflow.</div>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 0b: BUILDING BLOCKS                                       -->
+<!-- ============================================================ -->
+<div id="tab-blocks" class="tab-content">
+<h2>Everything here reduces to one atomic unit — the agent run — declared once as data, not code. A workflow is just several of them, composed.</h2>
+
+<div class="scene">
+<svg viewBox="0 0 1140 345" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <pattern id="bgrid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0L0 0 0 20" fill="none" stroke="#161b22" stroke-width="0.5"/></pattern>
+</defs>
+<rect width="1140" height="345" fill="url(#bgrid)"/>
+
+<text x="570" y="30" text-anchor="middle" class="blbl" fill="#a371f7">THE AGENT RUN — a declarative spec, not code</text>
+
+<g class="comp"><rect x="460" y="145" width="220" height="100" fill="#2d1b4e" stroke="#a371f7"/><text x="570" y="185" text-anchor="middle" class="lbl" fill="#d2a8ff">Agent Run</text><text x="570" y="201" text-anchor="middle" class="desc">one atomic, declarative unit</text><text x="570" y="215" text-anchor="middle" class="desc">— a spec, not a program</text></g>
+
+<g class="comp"><rect x="110" y="50" width="280" height="75" fill="#1c2333" stroke="#d29922"/><text x="250" y="76" text-anchor="middle" class="lbl">Tools / MCP / Skills</text><text x="250" y="92" text-anchor="middle" class="desc">what it can reach: registered functions,</text><text x="250" y="105" text-anchor="middle" class="desc">MCP servers, mounted domain knowledge</text></g>
+
+<g class="comp"><rect x="750" y="50" width="280" height="75" fill="#1c2333" stroke="#3fb950"/><text x="890" y="76" text-anchor="middle" class="lbl">Permissions</text><text x="890" y="92" text-anchor="middle" class="desc">what it's allowed to do: spawn mode,</text><text x="890" y="105" text-anchor="middle" class="desc">network policy, credential scope</text></g>
+
+<g class="comp"><rect x="110" y="270" width="280" height="75" fill="#1c2333" stroke="#58a6ff"/><text x="250" y="296" text-anchor="middle" class="lbl">Prompt</text><text x="250" y="312" text-anchor="middle" class="desc">what it's asked to do —</text><text x="250" y="325" text-anchor="middle" class="desc">the task, in natural language</text></g>
+
+<g class="comp"><rect x="750" y="270" width="280" height="75" fill="#1c2333" stroke="#d2a8ff"/><text x="890" y="296" text-anchor="middle" class="lbl">Input / Output Schema</text><text x="890" y="312" text-anchor="middle" class="desc">the contract: what context it receives,</text><text x="890" y="325" text-anchor="middle" class="desc">what shape its answer must take</text></g>
+
+<line x1="390" y1="90" x2="458" y2="168" stroke="#d29922" stroke-width="1.5"/>
+<line x1="750" y1="90" x2="682" y2="168" stroke="#3fb950" stroke-width="1.5"/>
+<line x1="390" y1="305" x2="458" y2="225" stroke="#58a6ff" stroke-width="1.5"/>
+<line x1="750" y1="305" x2="682" y2="225" stroke="#d2a8ff" stroke-width="1.5"/>
+</svg>
+</div>
+
+<div class="static-content">
+<div class="banner">One building block, two levels of composition — a single agent run for a single-shot task, or several chained into a <b>workflow</b> for a multi-step task. Where each one <b>executes</b> (in-process, sub-process, sandbox) is a separate, orthogonal choice — see Tabs 1–3.</div>
+</div>
+
+<div class="scene">
+<svg viewBox="0 0 1140 150" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="blk-a1" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#58a6ff"/></marker>
+</defs>
+<rect width="1140" height="150" fill="url(#bgrid)"/>
+
+<text x="570" y="20" text-anchor="middle" class="blbl" fill="#58a6ff">THE WORKFLOW — composition, not a new execution model</text>
+
+<rect class="boundary" x="130" y="35" width="880" height="95" stroke="#58a6ff" opacity="0.3"/>
+
+<g class="comp"><rect x="160" y="50" width="220" height="65" fill="#2d1b4e" stroke="#a371f7"/><text x="270" y="73" text-anchor="middle" class="lbl" fill="#d2a8ff">Agent Run</text><text x="270" y="89" text-anchor="middle" class="desc">step: triage</text></g>
+
+<g class="comp"><rect x="460" y="50" width="220" height="65" fill="#2d2000" stroke="#d29922"/><text x="570" y="73" text-anchor="middle" class="lbl">Agent Run</text><text x="570" y="89" text-anchor="middle" class="desc">step: approve (human)</text></g>
+
+<g class="comp"><rect x="760" y="50" width="220" height="65" fill="#2d1b4e" stroke="#a371f7"/><text x="870" y="73" text-anchor="middle" class="lbl" fill="#d2a8ff">Agent Run</text><text x="870" y="89" text-anchor="middle" class="desc">step: remediate</text></g>
+
+<line x1="380" y1="82" x2="455" y2="82" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#blk-a1)"/>
+<line x1="680" y1="82" x2="755" y2="82" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#blk-a1)"/>
+<text x="417" y="44" text-anchor="middle" class="desc" fill="#58a6ff">output →</text>
+<text x="417" y="126" text-anchor="middle" class="desc" fill="#58a6ff">input context</text>
+<text x="717" y="44" text-anchor="middle" class="desc" fill="#58a6ff">output →</text>
+<text x="717" y="126" text-anchor="middle" class="desc" fill="#58a6ff">input context</text>
+</svg>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 1: SINGLE AGENT — IN-PROCESS (spawn: none)                -->
+<!-- ============================================================ -->
+<div id="tab-none" class="tab-content">
+<h2>POST /v1/agents/run, spawn: "none" — the agent runs in-process. Same agent loop (LLM + MCP tools + skills) used by every spawn mode.</h2>
+
+<div class="scene">
+<svg viewBox="0 0 1140 520" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <pattern id="ngrid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0L0 0 0 20" fill="none" stroke="#161b22" stroke-width="0.5"/></pattern>
+  <marker id="n-a1" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#58a6ff"/></marker>
+  <marker id="n-a2" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#3fb950"/></marker>
+  <marker id="n-a3" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#a371f7"/></marker>
+  <marker id="n-a4" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#d29922"/></marker>
+</defs>
+<rect width="1140" height="520" fill="url(#ngrid)"/>
+
+<rect class="boundary" x="145" y="75" width="670" height="260" stroke="#a371f7" opacity="0.35"/>
+<text x="160" y="92" class="blbl" fill="#a371f7" opacity="0.6">lightspeed-stack process — no isolation boundary</text>
+
+<g class="comp"><rect x="15" y="225" width="110" height="60" fill="#1f2937" stroke="#6366f1"/><text x="70" y="250" text-anchor="middle" class="lbl">Client</text><text x="70" y="266" text-anchor="middle" class="desc">API caller</text></g>
+
+<g class="comp"><rect x="160" y="205" width="190" height="100" fill="#1c2333" stroke="#58a6ff"/><text x="255" y="228" text-anchor="middle" class="lbl">API</text><text x="255" y="244" text-anchor="middle" class="desc">POST /v1/agents/run</text><text x="255" y="258" text-anchor="middle" class="desc">validates request,</text><text x="255" y="271" text-anchor="middle" class="desc">dispatches by spawn mode</text><text x="255" y="288" text-anchor="middle" class="param">spawn: "none"</text></g>
+
+<g class="comp" id="n-skills"><rect x="620" y="90" width="170" height="60" fill="#1c2333" stroke="#d29922"/><text x="705" y="113" text-anchor="middle" class="lbl">Skills</text><text x="705" y="129" text-anchor="middle" class="desc">SKILL.md → system prompt</text></g>
+
+<g class="comp"><rect x="620" y="230" width="170" height="80" fill="#2d1b4e" stroke="#a371f7"/><text x="705" y="254" text-anchor="middle" class="lbl" fill="#d2a8ff">pydantic-ai Agent</text><text x="705" y="270" text-anchor="middle" class="desc">think → act → observe</text><text x="705" y="284" text-anchor="middle" class="desc">loop until final answer</text></g>
+
+<g class="comp"><rect x="850" y="90" width="255" height="80" fill="#1f2937" stroke="#6366f1"/><text x="977" y="115" text-anchor="middle" class="lbl">LLM Provider</text><text x="977" y="131" text-anchor="middle" class="desc">OpenAI / Anthropic / Azure</text><text x="977" y="145" text-anchor="middle" class="desc">inference calls</text></g>
+
+<g class="comp"><rect x="850" y="360" width="255" height="80" fill="#1c2333" stroke="#3fb950"/><text x="977" y="385" text-anchor="middle" class="lbl">MCP Server</text><text x="977" y="401" text-anchor="middle" class="desc">kubectl-mcp (example)</text><text x="977" y="415" text-anchor="middle" class="desc">tool calls, via MCPToolset</text></g>
+
+<line id="n-f1" class="flow" x1="125" y1="255" x2="155" y2="255" stroke="#58a6ff" marker-end="url(#n-a1)"/>
+<line id="n-f2" class="flow" x1="350" y1="255" x2="615" y2="255" stroke="#58a6ff" marker-end="url(#n-a1)"/>
+<line id="n-f3" class="flow" x1="705" y1="150" x2="705" y2="225" stroke="#d29922" marker-end="url(#n-a4)"/>
+<line id="n-f4" class="flow" x1="790" y1="255" x2="845" y2="180" stroke="#a371f7" marker-end="url(#n-a3)"/>
+<line id="n-f5" class="flow" x1="1000" y1="170" x2="800" y2="245" stroke="#d2a8ff" marker-end="url(#n-a3)"/>
+<line id="n-f6" class="flow" x1="790" y1="290" x2="855" y2="380" stroke="#3fb950" marker-end="url(#n-a2)"/>
+<line id="n-f7" class="flow" x1="850" y1="410" x2="795" y2="300" stroke="#3fb950" marker-end="url(#n-a2)"/>
+<line id="n-f8" class="flow" x1="620" y1="265" x2="570" y2="255" stroke="#a371f7" marker-end="url(#n-a3)"/>
+<line id="n-f9" class="flow" x1="615" y1="290" x2="350" y2="290" stroke="#3fb950" marker-end="url(#n-a2)"/>
+<line id="n-f10" class="flow" x1="155" y1="270" x2="125" y2="270" stroke="#3fb950" marker-end="url(#n-a2)"/>
+
+<g id="n-sbar" style="opacity:0"><rect class="step-bar" x="15" y="15" width="1110" height="42"/><text id="n-sn" class="step-n" x="30" y="42"></text><text id="n-st" class="step-t" x="145" y="42"></text></g>
+</svg>
+</div>
+
+<div class="controls">
+  <button class="go" onclick="N.autoPlay()">Auto Play</button>
+  <button class="go" id="n-bn" onclick="N.next()">Next Step &rarr;</button>
+  <button onclick="N.reset()">Reset</button>
+  <span class="info" id="n-info"></span>
+</div>
+<div class="log"><div class="logc" id="n-lc"></div></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 2: SINGLE AGENT — OPENSHELL (spawn: ephemeral)            -->
+<!-- ============================================================ -->
+<div id="tab-eph" class="tab-content">
+<h2>Same request, same agent loop, same output shape — POST /v1/agents/run, spawn: "ephemeral". The difference is entirely underneath: a gateway-mediated, hardened sandbox instead of the API process.</h2>
+
+<div class="scene">
+<svg viewBox="0 0 1140 560" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <pattern id="egrid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0L0 0 0 20" fill="none" stroke="#161b22" stroke-width="0.5"/></pattern>
+  <marker id="e-a1" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#58a6ff"/></marker>
+  <marker id="e-a2" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#3fb950"/></marker>
+  <marker id="e-a3" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#a371f7"/></marker>
+  <marker id="e-a4" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#d29922"/></marker>
+</defs>
+<rect width="1140" height="560" fill="url(#egrid)"/>
+
+<rect class="boundary" x="145" y="205" width="230" height="145" stroke="#a371f7" opacity="0.35"/>
+<text x="160" y="222" class="blbl" fill="#a371f7" opacity="0.6">lightspeed-stack process</text>
+
+<rect class="boundary" x="560" y="45" width="360" height="440" stroke="#a371f7" opacity="0.4"/>
+<text x="575" y="62" class="blbl" fill="#a371f7" opacity="0.65">OpenShell</text>
+
+<rect class="boundary" id="e-sandbound" x="705" y="110" width="205" height="340" stroke="#238636" opacity="0"/>
+<text id="e-sandlbl" x="715" y="127" class="blbl" fill="#3fb950" opacity="0">Ephemeral Sandbox</text>
+
+<g class="comp"><rect x="15" y="245" width="110" height="60" fill="#1f2937" stroke="#6366f1"/><text x="70" y="270" text-anchor="middle" class="lbl">Client</text><text x="70" y="286" text-anchor="middle" class="desc">API caller</text></g>
+
+<g class="comp"><rect x="160" y="225" width="190" height="100" fill="#1c2333" stroke="#58a6ff"/><text x="255" y="248" text-anchor="middle" class="lbl">API</text><text x="255" y="264" text-anchor="middle" class="desc">POST /v1/agents/run</text><text x="255" y="278" text-anchor="middle" class="desc">dispatches by spawn mode</text><text x="255" y="291" text-anchor="middle" class="desc">same request shape as Tab 1</text><text x="255" y="308" text-anchor="middle" class="param">spawn: "ephemeral"</text></g>
+
+<g class="comp"><rect x="580" y="235" width="105" height="80" fill="#1c1030" stroke="#a371f7"/><text x="632" y="258" text-anchor="middle" class="lbl" fill="#d2a8ff">Gateway</text><text x="632" y="274" text-anchor="middle" class="desc">gRPC: CreateSandbox</text><text x="632" y="288" text-anchor="middle" class="desc">issues per-sandbox JWT</text></g>
+
+<g class="comp hardened" id="e-skills" style="opacity:0"><rect x="715" y="130" width="185" height="55" fill="#0d2818" stroke="#3fb950"/><text x="807" y="151" text-anchor="middle" class="lbl">Skills</text><text x="807" y="166" text-anchor="middle" class="desc">image mounted at spawn</text></g>
+
+<g class="comp hardened" id="e-agent" style="opacity:0"><rect x="715" y="280" width="185" height="80" fill="#0d2818" stroke="#3fb950"/><text x="807" y="304" text-anchor="middle" class="lbl">pydantic-ai Agent</text><text x="807" y="320" text-anchor="middle" class="desc">same loop as Tab 1</text><text x="807" y="334" text-anchor="middle" class="desc">Landlock + seccomp + netns</text></g>
+
+<g class="comp"><rect x="955" y="90" width="170" height="80" fill="#1f2937" stroke="#6366f1"/><text x="1040" y="115" text-anchor="middle" class="lbl">LLM Provider</text><text x="1040" y="131" text-anchor="middle" class="desc">reached via OPA-scoped</text><text x="1040" y="145" text-anchor="middle" class="desc">egress policy</text></g>
+
+<g class="comp"><rect x="955" y="400" width="170" height="80" fill="#1c2333" stroke="#3fb950"/><text x="1040" y="425" text-anchor="middle" class="lbl">MCP Server</text><text x="1040" y="441" text-anchor="middle" class="desc">reached via OPA-scoped</text><text x="1040" y="455" text-anchor="middle" class="desc">egress policy</text></g>
+
+<line id="e-f1" class="flow" x1="125" y1="275" x2="155" y2="275" stroke="#58a6ff" marker-end="url(#e-a1)"/>
+<line id="e-f2" class="flow" x1="350" y1="275" x2="575" y2="275" stroke="#58a6ff" marker-end="url(#e-a1)"/>
+<line id="e-f3" class="flow" x1="350" y1="275" x2="575" y2="275" stroke="#d29922" marker-end="url(#e-a4)"/>
+<line id="e-f4" class="flow" x1="685" y1="255" x2="712" y2="160" stroke="#a371f7" marker-end="url(#e-a3)"/>
+<line id="e-f5" class="flow" x1="685" y1="295" x2="712" y2="315" stroke="#a371f7" marker-end="url(#e-a3)"/>
+<line id="e-f6" class="flow" x1="807" y1="185" x2="807" y2="280" stroke="#3fb950" marker-end="url(#e-a2)"/>
+<line id="e-f7" class="flow" x1="900" y1="310" x2="950" y2="135" stroke="#d2a8ff" marker-end="url(#e-a3)"/>
+<line id="e-f8" class="flow" x1="1040" y1="170" x2="905" y2="295" stroke="#d2a8ff" marker-end="url(#e-a3)"/>
+<line id="e-f9" class="flow" x1="900" y1="335" x2="950" y2="425" stroke="#3fb950" marker-end="url(#e-a2)"/>
+<line id="e-f10" class="flow" x1="1040" y1="445" x2="905" y2="350" stroke="#3fb950" marker-end="url(#e-a2)"/>
+<line id="e-f13" class="flow" x1="155" y1="290" x2="125" y2="290" stroke="#3fb950" marker-end="url(#e-a2)"/>
+
+<g id="e-sbar" style="opacity:0"><rect class="step-bar" x="15" y="15" width="1110" height="42"/><text id="e-sn" class="step-n" x="30" y="42"></text><text id="e-st" class="step-t" x="145" y="42"></text></g>
+</svg>
+</div>
+
+<div class="controls">
+  <button class="go" onclick="E.autoPlay()">Auto Play</button>
+  <button class="go" id="e-bn" onclick="E.next()">Next Step &rarr;</button>
+  <button onclick="E.reset()">Reset</button>
+  <span class="info" id="e-info"></span>
+</div>
+<div class="log"><div class="logc" id="e-lc"></div></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 3: MULTI-STEP WORKFLOW — OPENSHELL                        -->
+<!-- ============================================================ -->
+<div id="tab-wf" class="tab-content">
+<h2>POST /v1/workflows/run — a workflow is a graph of steps, and each step is exactly the single-agent-invocation from Tab 2. The workflow runner owns sequencing, context-passing, and approval gates; it does not re-implement the agent loop.</h2>
+
+<div class="scene">
+<svg viewBox="0 0 1140 560" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <pattern id="wgrid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0L0 0 0 20" fill="none" stroke="#161b22" stroke-width="0.5"/></pattern>
+  <marker id="w-a1" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#58a6ff"/></marker>
+  <marker id="w-a2" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#3fb950"/></marker>
+  <marker id="w-a3" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#d29922"/></marker>
+</defs>
+<rect width="1140" height="560" fill="url(#wgrid)"/>
+
+<g class="comp"><rect x="15" y="156" width="110" height="60" fill="#1f2937" stroke="#6366f1"/><text x="70" y="181" text-anchor="middle" class="lbl">Client</text><text x="70" y="197" text-anchor="middle" class="desc">API caller</text></g>
+
+<rect class="boundary" x="145" y="130" width="250" height="270" stroke="#a371f7" opacity="0.35"/>
+<text x="160" y="148" class="blbl" fill="#a371f7" opacity="0.6">lightspeed-stack process</text>
+
+<g class="comp"><rect x="160" y="152" width="220" height="68" fill="#1c2333" stroke="#58a6ff"/><text x="270" y="175" text-anchor="middle" class="lbl">API</text><text x="270" y="191" text-anchor="middle" class="desc">POST /v1/workflows/run</text><text x="270" y="205" text-anchor="middle" class="desc">creates run row, dispatches steps</text></g>
+
+<g class="comp"><rect x="160" y="234" width="220" height="150" fill="#1c2333" stroke="#58a6ff"/><text x="270" y="257" text-anchor="middle" class="lbl">LocalWorkflowRunner</text><text x="270" y="274" text-anchor="middle" class="desc">owns sequencing &amp; step execution</text><line x1="172" y1="284" x2="368" y2="284" stroke="#30363d" stroke-width="0.5"/><text x="178" y="300" class="desc">steps:</text><text x="188" y="314" class="param">1. triage (ephemeral)</text><text x="188" y="328" class="param">2. approve (human)</text><text x="188" y="342" class="param">3. remediate (ephemeral)</text><text x="178" y="359" class="desc">passes step output forward</text><text x="178" y="372" class="desc">as context to the next step</text></g>
+
+<g class="comp">
+  <path d="M 160,433 L 160,547 A 110,18 0 0 0 380,547 L 380,433 Z" fill="#1c2333" stroke="#8b949e" stroke-width="2"/>
+  <ellipse cx="270" cy="433" rx="110" ry="18" fill="#232b3d" stroke="#8b949e" stroke-width="2"/>
+  <text x="270" y="476" text-anchor="middle" class="lbl">RunStateStore</text>
+  <text x="270" y="492" text-anchor="middle" class="desc">PostgreSQL — not part of the gateway</text>
+  <text x="270" y="508" text-anchor="middle" class="desc">workflow_id, status, per-step output</text>
+  <text x="270" y="524" text-anchor="middle" class="desc">queryable via GET /v1/workflows/{id}</text>
+</g>
+
+<rect class="boundary" x="460" y="55" width="420" height="360" stroke="#a371f7" opacity="0.4"/>
+<text x="475" y="72" class="blbl" fill="#a371f7" opacity="0.65">OpenShell</text>
+
+<rect class="boundary" id="w-sandbound" x="480" y="95" width="380" height="290" stroke="#238636" opacity="0"/>
+<text id="w-sandlbl" x="495" y="112" class="blbl" fill="#3fb950" opacity="0">Ephemeral Sandbox (one per step)</text>
+
+<g class="comp eph" id="w-step" style="opacity:0"><rect x="530" y="140" width="280" height="100" fill="#0d2818" stroke="#238636"/><rect x="540" y="150" width="100" height="18" rx="4" fill="#1a4731" stroke="none"/><text id="w-steplbl" x="590" y="163" text-anchor="middle" class="step-n" font-size="10">STEP</text><text x="670" y="185" text-anchor="middle" class="desc">= Tab 2's OpenShell flow</text><text x="670" y="199" text-anchor="middle" class="desc">agent loop: LLM + MCP + skills</text><text x="670" y="213" text-anchor="middle" class="desc" fill="#3fb950">fresh sandbox, destroyed after</text></g>
+
+<g class="comp"><rect x="920" y="190" width="205" height="90" fill="#1c2333" stroke="#8b949e"/><text x="1022" y="215" text-anchor="middle" class="lbl">LLM + MCP</text><text x="1022" y="231" text-anchor="middle" class="desc">external, same as Tab 2 —</text><text x="1022" y="245" text-anchor="middle" class="desc">reached via OPA-scoped egress</text><text x="1022" y="259" text-anchor="middle" class="desc">from inside each step's sandbox</text></g>
+
+<g class="comp"><rect x="420" y="470" width="230" height="55" fill="#2d2000" stroke="#d29922"/><text x="535" y="493" text-anchor="middle" class="lbl" fill="#e3b341">Approval Channel</text><text x="535" y="509" text-anchor="middle" class="desc">Slack / Webhook — pauses the runner</text></g>
+
+<g class="comp"><rect x="940" y="470" width="150" height="55" fill="#1f2937" stroke="#6366f1"/><text x="1015" y="493" text-anchor="middle" class="lbl">Human Approver</text><text x="1015" y="509" text-anchor="middle" class="desc">SRE / Operator</text></g>
+
+<line id="w-f1" class="flow" x1="125" y1="186" x2="155" y2="186" stroke="#58a6ff" marker-end="url(#w-a1)"/>
+<line id="w-f0" class="flow" x1="270" y1="220" x2="270" y2="232" stroke="#58a6ff" marker-end="url(#w-a1)"/>
+<line id="w-f2" class="flow" x1="270" y1="384" x2="270" y2="413" stroke="#8b949e" marker-end="url(#w-a1)"/>
+<line id="w-f3" class="flow" x1="380" y1="274" x2="525" y2="185" stroke="#3fb950" marker-end="url(#w-a2)"/>
+<line id="w-f4" class="flow" x1="810" y1="190" x2="915" y2="225" stroke="#3fb950" marker-end="url(#w-a2)"/>
+<line id="w-f5" class="flow" x1="920" y1="245" x2="815" y2="210" stroke="#3fb950" marker-end="url(#w-a2)"/>
+<line id="w-f6" class="flow" x1="530" y1="230" x2="385" y2="460" stroke="#3fb950" marker-end="url(#w-a2)"/>
+<line id="w-f7" class="flow" x1="270" y1="384" x2="500" y2="470" stroke="#d29922" marker-end="url(#w-a3)"/>
+<line id="w-f8" class="flow" x1="650" y1="497" x2="935" y2="497" stroke="#d29922" marker-end="url(#w-a3)"/>
+<line id="w-f9" class="flow" x1="940" y1="480" x2="385" y2="334" stroke="#3fb950" marker-end="url(#w-a2)"/>
+
+<g id="w-sbar" style="opacity:0"><rect class="step-bar" x="15" y="15" width="1110" height="42"/><text id="w-sn" class="step-n" x="30" y="42"></text><text id="w-st" class="step-t" x="145" y="42"></text></g>
+</svg>
+</div>
+
+<div class="controls">
+  <button class="go" onclick="W.autoPlay()">Auto Play</button>
+  <button class="go" id="w-bn" onclick="W.next()">Next Step &rarr;</button>
+  <button onclick="W.reset()">Reset</button>
+  <span class="info" id="w-info"></span>
+</div>
+<div class="log"><div class="logc" id="w-lc"></div></div>
+
+<div class="static-content">
+<div class="note">
+  <b>Not covered here:</b> lightspeed-stack's existing <code>/query</code> chatbot endpoint is separately being evaluated for a future migration onto cloud-agents' <code>ChatWorkflowRunner</code> (conversation-aware execution, shared middleware for shields/quota/tracing). Left out of these illustrations to keep the story focused on the agent-run/workflow path shown above, which is further along and already shipping.
+</div>
+</div>
+</div>
+
+<script>
+function switchTab(id) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  event.target.classList.add('active');
+  N.reset(); E.reset(); W.reset();
+}
+
+function createPlayer(prefix, tabId, showIds, steps, opts) {
+  opts = opts || {};
+  let ci = 0, tm = null, mode = 'idle';
+  const $ = id => document.getElementById(id);
+
+  function off() {
+    document.querySelectorAll('#' + tabId + ' .flow').forEach(l => l.classList.remove('on'));
+  }
+
+  function doStep(i) {
+    const s = steps[i];
+    $(prefix + 'sbar').style.opacity = 1;
+    $(prefix + 'sn').textContent = 'Step ' + (i + 1) + '/' + steps.length;
+    $(prefix + 'st').textContent = s.t;
+    off();
+    (s.on || []).forEach(id => { const e = $(id); if (e) e.classList.add('on'); });
+    (s.show || []).forEach(id => { const e = $(id); if (e) { e.style.opacity = 1; e.style.transition = 'opacity 0.4s'; } });
+    (s.hide || []).forEach(id => { const e = $(id); if (e) { e.style.opacity = 0; e.style.transition = 'opacity 0.6s'; } });
+    if (opts.label && s.label) { const e = $(opts.label); if (e) e.textContent = s.label; }
+    const lc = $(prefix + 'lc');
+    lc.innerHTML += s.log + '\n';
+    lc.scrollTop = lc.scrollHeight;
+  }
+
+  return {
+    autoPlay() {
+      this.reset(); mode = 'auto'; ci = 0;
+      $(prefix + 'info').textContent = 'Auto playing...'; $(prefix + 'bn').disabled = true;
+      (function go() {
+        if (ci >= steps.length || mode !== 'auto') { if (ci >= steps.length) { off(); $(prefix + 'info').textContent = 'Done'; } return; }
+        doStep(ci); ci++;
+        tm = setTimeout(go, 2400);
+      })();
+    },
+    next() {
+      if (mode === 'auto') return;
+      if (mode === 'idle') { this.reset(); mode = 'manual'; }
+      if (ci >= steps.length) return;
+      doStep(ci); ci++;
+      $(prefix + 'info').textContent = ci >= steps.length ? 'Done' : ci + '/' + steps.length + ' — click Next Step';
+      if (ci >= steps.length) $(prefix + 'bn').disabled = true;
+    },
+    reset() {
+      if (tm) clearTimeout(tm); mode = 'idle'; ci = 0; off();
+      $(prefix + 'sbar').style.opacity = 0;
+      showIds.forEach(id => { const e = $(id); if (e) e.style.opacity = 0; });
+      $(prefix + 'lc').innerHTML = ''; $(prefix + 'info').textContent = ''; $(prefix + 'bn').disabled = false;
+    }
+  };
+}
+
+const N = createPlayer('n-', 'tab-none', ['n-skills'], [
+  { t: 'Client sends the request — params visible in full', on: ['n-f1'],
+    log: '<span class="ls">→ POST /v1/agents/run</span>\n{\n  "prompt": "Is pod checkout-7f9 healthy?",\n  "spawn": "none",\n  "tools": ["get_pod_status"],\n  "mcp_servers": ["kubectl-mcp"],\n  "skills_paths": ["/skills/k8s-triage"],\n  "output_schema": {"healthy": "bool", "reason": "string"}\n}' },
+  { t: 'lightspeed-stack dispatches by spawn mode', on: ['n-f2'],
+    log: '<span class="ls">→ spawn: "none"</span> → get_step_executor() returns <span class="ld">DirectExecutor</span>' },
+  { t: 'DirectExecutor builds the agent: loads skills + tools + MCP', on: ['n-f3'], show: ['n-skills'],
+    log: '<span class="ld">⚙ Agent("openai:gpt-4o-mini")</span>\n  system_prompt += SKILL.md content (k8s-triage)\n  tools: [get_pod_status] + MCPToolset(kubectl-mcp)' },
+  { t: 'Agent loop, turn 1 — inference call', on: ['n-f4'],
+    log: '<span class="lp">→ LLM inference:</span> "Is pod checkout-7f9 healthy?"' },
+  { t: 'LLM decides a tool is needed', on: ['n-f5'],
+    log: '<span class="lp">← tool_call:</span> get_pod_status(namespace="prod", pod="checkout-7f9")' },
+  { t: 'Agent calls the MCP tool', on: ['n-f6', 'n-f7'],
+    log: '<span class="ld">→ MCP kubectl-mcp:</span> get_pod_status(...)\n<span class="ld">← result:</span> {status:"CrashLoopBackOff", restarts:14}' },
+  { t: 'Agent loop, turn 2 — inference with tool result', on: ['n-f8'],
+    log: '<span class="lp">→ LLM inference</span> (with tool result)\n<span class="lp">← structured output:</span> {healthy:false, reason:"CrashLoopBackOff", restarts:14}' },
+  { t: 'Result returns to the client', on: ['n-f9', 'n-f10'],
+    log: '<span class="ls">← StepResult</span> {status:"completed", input_tokens:412, output_tokens:38}\n<span class="ls">← 200 OK</span> to client' },
+]);
+
+const E = createPlayer('e-', 'tab-eph', ['e-sandbound', 'e-sandlbl', 'e-skills', 'e-agent'], [
+  { t: 'Client sends the same shape of request — only spawn differs', on: ['e-f1'],
+    log: '<span class="ls">→ POST /v1/agents/run</span>\n{\n  "prompt": "Is pod checkout-7f9 healthy?",\n  "spawn": "ephemeral",\n  "tools": ["get_pod_status"],\n  "mcp_servers": ["kubectl-mcp"],\n  "skills_image": "registry/skills:v1",\n  "sandbox_image": "lightspeed-agentic-sandbox:latest"\n}' },
+  { t: 'lightspeed-stack dispatches by spawn mode', on: ['e-f2'],
+    log: '<span class="ls">→ spawn: "ephemeral"</span> → get_step_executor() returns <span class="lw">SandboxExecutor</span>' },
+  { t: 'SandboxExecutor builds a spawner from config', on: ['e-f3'],
+    log: '<span class="lw">⚙ spawner_factory.build_spawner("openshell", ...)</span> → OpenShellSpawner (gRPC client)' },
+  { t: 'Spawner asks the gateway to create a sandbox', show: ['e-sandbound', 'e-sandlbl'],
+    log: '<span class="lp">→ gRPC CreateSandbox</span> → Gateway issues per-sandbox JWT,\n  applies OPA network policy scoped to [kubectl-mcp, openai.com]' },
+  { t: 'Gateway spawns the hardened sandbox, mounts skills', on: ['e-f4'], show: ['e-skills'],
+    log: '<span class="ld">⚙ sandbox up:</span> Landlock + seccomp + network namespace\n  skills image mounted read-only' },
+  { t: 'SandboxExecutor calls the sandbox — same contract as any spawn mode', on: ['e-f5'], show: ['e-agent'],
+    log: '<span class="ld">→ POST /v1/agent/run</span> (inside sandbox, mTLS + JWT)\n  boots the same pydantic-ai agent loop as Tab 1' },
+  { t: 'Agent loop, turn 1 — inference (through gateway egress policy)', on: ['e-f6', 'e-f7'],
+    log: '<span class="lp">→ LLM inference:</span> "Is pod checkout-7f9 healthy?" (egress allowed by policy)' },
+  { t: 'Agent calls the MCP tool (through gateway egress policy)', on: ['e-f6', 'e-f9'],
+    log: '<span class="lp">← tool_call:</span> get_pod_status(...)\n<span class="ld">→ MCP kubectl-mcp</span> (egress allowed by policy) <span class="ld">← result</span> {status:"CrashLoopBackOff"}' },
+  { t: 'Agent loop, turn 2 — final structured answer', on: ['e-f6', 'e-f7'],
+    log: '<span class="lp">← structured output:</span> {healthy:false, reason:"CrashLoopBackOff", restarts:14}' },
+  { t: 'Transcript pulled, sandbox destroyed, result returned', on: ['e-f5', 'e-f4', 'e-f3', 'e-f2', 'e-f1'], hide: ['e-sandbound', 'e-sandlbl', 'e-skills', 'e-agent'],
+    log: '<span class="ld">→ GET /v1/agent/events</span> (transcript)\n<span class="le">↓ DeleteSandbox</span> — container destroyed\n<span class="ls">← 200 OK</span> to client — identical response shape to Tab 1' },
+]);
+
+const W = createPlayer('w-', 'tab-wf', ['w-step', 'w-sandbound', 'w-sandlbl'], [
+  { t: 'Client starts the workflow — API receives the definition', on: ['w-f1'],
+    log: '<span class="ls">→ POST /v1/workflows/run</span>\n{ "definition": {"steps": [\n    {"name":"triage","spawn":"ephemeral"},\n    {"name":"approve","type":"human-approval"},\n    {"name":"remediate","spawn":"ephemeral"}\n  ]}}' },
+  { t: 'API creates the run row, dispatches to the runner', on: ['w-f0'],
+    log: '<span class="ls">→ API</span> creates run row → hands off to <span class="ld">LocalWorkflowRunner</span>' },
+  { t: 'Runner resolves the graph, persists workflow_id', on: ['w-f2'],
+    log: '<span class="ls">→ LocalWorkflowRunner</span> loads definition, persists workflow_id in RunStateStore' },
+  { t: 'Step "triage" runs — exactly Tab 2\'s OpenShell flow, as one unit', on: ['w-f3', 'w-f4', 'w-f5'], show: ['w-sandbound', 'w-sandlbl', 'w-step'], label: 'w-steplbl',
+    log: '<span class="ld">⚙ step "triage"</span> (spawn: ephemeral) — spawn sandbox → agent loop\n  (LLM + MCP + skills, same as Tab 2)' },
+  { t: 'triage output returned to RunStateStore — sandbox still up until torn down', on: ['w-f6'],
+    log: '<span class="ld">← output:</span> {severity:"high", root_cause:"bad image"} → RunStateStore' },
+  { t: 'Sandbox destroyed; workflow pauses at "approve"', hide: ['w-sandbound', 'w-sandlbl', 'w-step'], on: ['w-f7'],
+    log: '<span class="le">↓ sandbox destroyed</span>\n<span class="lw">⏸ workflow paused</span> at step "approve"' },
+  { t: 'Approval channel notifies a human', on: ['w-f8'],
+    log: '<span class="lw">→ Slack #sre-approvals:</span> "High-severity issue on checkout-7f9. Approve remediation?"' },
+  { t: 'Human approves; runner resumes', on: ['w-f9'],
+    log: '<span class="ld">← approved</span> by sre-lead@redhat.com (38s) → RunStateStore, runner resumes' },
+  { t: 'Step "remediate" runs — new sandbox, context from triage', on: ['w-f3', 'w-f4', 'w-f5'], show: ['w-sandbound', 'w-sandlbl', 'w-step'], label: 'w-steplbl',
+    log: '<span class="ld">⚙ step "remediate"</span> (spawn: ephemeral) — fresh sandbox, context = triage output\n  same agent loop as Tab 2' },
+  { t: 'remediate output returned to RunStateStore — sandbox still up', on: ['w-f6'],
+    log: '<span class="ld">← output:</span> {actions_taken:2, cluster_healthy:true} → RunStateStore' },
+  { t: 'Sandbox destroyed; workflow completed', hide: ['w-sandbound', 'w-sandlbl', 'w-step'],
+    log: '<span class="le">↓ sandbox destroyed</span>\n<span class="ls">✓ workflow COMPLETED</span> — queryable via GET /v1/workflows/{id}\n\n  2 ephemeral sandboxes created and destroyed. One human decision. Zero long-running agents.' },
+]);
+</script>
+
+<div style="text-align:center; padding:20px 0 10px; color:#484f58; font-size:11px;">
+  Last updated: <span id="build-date"></span>
+</div>
+<script>
+document.getElementById('build-date').textContent = document.lastModified;
+</script>
+</body>
+</html>

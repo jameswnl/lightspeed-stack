@@ -30,9 +30,7 @@ def build_spawner(spawner_config: SpawnerConfiguration) -> Any:
     if _spawner is not None:
         return _spawner
 
-    # pylint: disable=import-outside-toplevel,import-error,no-name-in-module
-    # cloud_agents.spawner.factory: lightspeed-cloud-agents#182
-    from cloud_agents.spawner.factory import (  # pyright: ignore[reportMissingImports]
+    from cloud_agents.spawner.factory import (  # pylint: disable=import-outside-toplevel
         build_spawner as _cloud_agents_build_spawner,
     )
 

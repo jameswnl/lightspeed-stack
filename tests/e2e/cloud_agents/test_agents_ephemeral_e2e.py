@@ -9,9 +9,11 @@ Requires:
 - A running OpenShell gateway (default: localhost:9080, matching
   ~/ws/local-infra's Kind-deployed gateway; see test_spawn_modes_e2e.py
   for setup instructions)
-- cloud_agents.spawner.factory (lightspeed-cloud-agents#182) available in
-  the installed editable dependency -- skipped automatically until that
-  lands, since this test's whole point is exercising it for real.
+- cloud_agents.spawner.factory.build_spawner (lightspeed-cloud-agents#182)
+  available in the installed editable dependency. `uv sync` has been
+  observed to silently drop the editable cloud-agents install (see
+  ~/ws/lightspeed-stack CLAUDE.md), so this is skipped defensively
+  rather than erroring if that's happened.
 
 Usage:
     OPENSHELL_GATEWAY_URL=localhost:9080 \
@@ -42,8 +44,8 @@ pytestmark = [
     ),
     pytest.mark.skipif(
         importlib.util.find_spec("cloud_agents.spawner.factory") is None,
-        reason="requires lightspeed-cloud-agents#182 "
-        "(cloud_agents.spawner.factory.build_spawner)",
+        reason="cloud_agents.spawner.factory not installed -- "
+        "re-run: uv pip install -e ~/ws/lightspeed-cloud-agents[local,kubernetes,openshell]",
     ),
 ]
 

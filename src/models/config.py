@@ -3157,9 +3157,18 @@ class SpawnerConfiguration(ConfigurationBase):
         max_pods: Maximum concurrent sandbox pods.
         namespace: Kubernetes namespace for sandbox pods.
         service_account: Default K8s service account for sandbox pods.
+        openshell_gateway_url: OpenShell gateway gRPC endpoint (openshell spawner only).
+        openshell_driver: Compute driver the OpenShell gateway itself uses.
+        openshell_workspace: OpenShell workspace name.
+        openshell_http_endpoint: Override HTTP proxy endpoint, when split
+            from the gRPC endpoint.
+        openshell_tls_ca: CA cert path for the OpenShell gateway connection.
+        openshell_tls_cert: Client cert path for mTLS to the OpenShell gateway.
+        openshell_tls_key: Client key path for mTLS to the OpenShell gateway.
+        openshell_bearer_token: Bearer token for OIDC auth to the OpenShell gateway.
     """
 
-    type: Literal["kubernetes", "podman"] = Field(
+    type: Literal["kubernetes", "podman", "openshell"] = Field(
         ...,
         title="Spawner type",
         description="Backend for spawning ephemeral agent containers.",
@@ -3188,6 +3197,75 @@ class SpawnerConfiguration(ConfigurationBase):
         title="Service account",
         description="Default K8s service account for sandbox pods.",
     )
+
+    openshell_gateway_url: Optional[str] = Field(
+        None,
+        title="OpenShell gateway URL",
+        description="OpenShell gateway gRPC endpoint, e.g. 'localhost:9080' "
+        "(openshell spawner only).",
+    )
+
+    openshell_driver: Literal["kubernetes", "podman"] = Field(
+        "podman",
+        title="OpenShell compute driver",
+        description="Compute driver the OpenShell gateway itself uses to spawn "
+        "sandboxes (openshell spawner only). Matches "
+        "cloud_agents.spawner.factory's own default.",
+    )
+
+    openshell_workspace: str = Field(
+        "default",
+        title="OpenShell workspace",
+        description="OpenShell workspace name (openshell spawner only).",
+    )
+
+    openshell_http_endpoint: Optional[str] = Field(
+        None,
+        title="OpenShell HTTP endpoint",
+        description="Override HTTP proxy endpoint for the OpenShell gateway, "
+        "when gRPC and HTTP are split across different addresses "
+        "(openshell spawner only).",
+    )
+
+    openshell_tls_ca: Optional[FilePath] = Field(
+        None,
+        title="OpenShell gateway CA cert",
+        description="CA certificate path for the OpenShell gateway connection.",
+    )
+
+    openshell_tls_cert: Optional[FilePath] = Field(
+        None,
+        title="OpenShell client cert",
+        description="Client certificate path for mTLS to the OpenShell gateway.",
+    )
+
+    openshell_tls_key: Optional[FilePath] = Field(
+        None,
+        title="OpenShell client key",
+        description="Client key path for mTLS to the OpenShell gateway.",
+    )
+
+    openshell_bearer_token: Optional[SecretStr] = Field(
+        None,
+        title="OpenShell bearer token",
+        description="Bearer token for OIDC auth to the OpenShell gateway.",
+    )
+
+    @model_validator(mode="after")
+    def check_openshell_gateway_url(self) -> Self:
+        """Require openshell_gateway_url when type is 'openshell'.
+
+        Returns:
+            Self: The validated model instance.
+
+        Raises:
+            ValueError: If type is 'openshell' and openshell_gateway_url is unset.
+        """
+        if self.type == "openshell" and not self.openshell_gateway_url:
+            raise ValueError(
+                "openshell_gateway_url is required when spawner type is 'openshell'"
+            )
+        return self
 
 
 class Configuration(ConfigurationBase):

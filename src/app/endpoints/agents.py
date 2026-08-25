@@ -16,6 +16,8 @@ from log import get_logger
 from models.api.requests.agents import AgentRunRequest
 from models.config import Action
 from utils.endpoints import check_configuration_loaded
+from workflow.provider_credentials import credentials_secret_for
+from workflow.spawner_factory import build_spawner
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["agents"])
@@ -59,29 +61,41 @@ async def run_agent_handler(
         "prompt": body.prompt,
     }
 
-    spawner_config = configuration.spawner_configuration
-    if body.spawn == "ephemeral" and not spawner_config:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="spawn=ephemeral requires a spawner configuration.",
-        )
+    spawner = None
+    sandbox_image = None
+    provider: dict[str, Any] = {"name": body.provider or "", "model": body.model or ""}
+    if body.spawn == "ephemeral":
+        spawner_config = configuration.spawner_configuration
+        if not spawner_config:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="spawn=ephemeral requires a spawner configuration.",
+            )
+        spawner = build_spawner(spawner_config)
+        sandbox_image = body.sandbox_image or spawner_config.sandbox_image
+        cred_secret = credentials_secret_for(body.provider or "")
+        if cred_secret:
+            provider["credentials_secret"] = cred_secret
 
-    executor = get_step_executor(step_def, spawner=None)
+    executor = get_step_executor(step_def, spawner=spawner)
 
     user_id, username, _, _ = auth
 
-    step_input = StepInput(
-        prompt=body.prompt,
-        provider={"name": body.provider or "", "model": body.model or ""},
-        system_prompt=body.instructions,
-        output_schema=body.output_schema,
-        tools=body.tools,
-        mcp_servers=body.mcp_servers,
-        context=body.context or {},
-        step_name="agent-run",
-        output_key="result",
-        metadata=StepMetadata(user_id=user_id),
-    )
+    step_input_kwargs: dict[str, Any] = {
+        "prompt": body.prompt,
+        "provider": provider,
+        "system_prompt": body.instructions,
+        "output_schema": body.output_schema,
+        "tools": body.tools,
+        "mcp_servers": body.mcp_servers,
+        "context": body.context or {},
+        "step_name": "agent-run",
+        "output_key": "result",
+        "metadata": StepMetadata(user_id=user_id),
+    }
+    if sandbox_image:
+        step_input_kwargs["sandbox_image"] = sandbox_image
+    step_input = StepInput(**step_input_kwargs)
 
     result = await executor.run(step_input)
 

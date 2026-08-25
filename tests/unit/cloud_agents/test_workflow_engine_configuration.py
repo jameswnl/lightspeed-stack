@@ -93,6 +93,45 @@ def test_spawner_configuration_custom_image() -> None:
     assert config.max_pods == 20
 
 
+def test_spawner_configuration_openshell_defaults() -> None:
+    """SpawnerConfiguration accepts openshell type with default fields."""
+    config = SpawnerConfiguration(
+        type="openshell", openshell_gateway_url="localhost:9080"
+    )
+    assert config.type == "openshell"
+    assert config.openshell_gateway_url == "localhost:9080"
+    assert config.openshell_driver == "podman"
+    assert config.openshell_workspace == "default"
+    assert config.openshell_tls_ca is None
+    assert config.openshell_tls_cert is None
+    assert config.openshell_tls_key is None
+    assert config.openshell_bearer_token is None
+
+
+def test_spawner_configuration_openshell_custom_values() -> None:
+    """SpawnerConfiguration accepts custom openshell fields."""
+    config = SpawnerConfiguration(
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
+        openshell_driver="podman",
+        openshell_workspace="lcore",
+        openshell_bearer_token="secret-token",
+    )
+    assert config.openshell_gateway_url == "localhost:9080"
+    assert config.openshell_driver == "podman"
+    assert config.openshell_workspace == "lcore"
+    assert (
+        config.openshell_bearer_token is not None
+        and config.openshell_bearer_token.get_secret_value() == "secret-token"
+    )
+
+
+def test_spawner_configuration_openshell_requires_gateway_url() -> None:
+    """openshell type without openshell_gateway_url is rejected."""
+    with pytest.raises(ValidationError, match="openshell_gateway_url"):
+        SpawnerConfiguration(type="openshell")
+
+
 def test_spawner_configuration_rejects_unknown_type() -> None:
     """SpawnerConfiguration rejects invalid type values."""
     with pytest.raises(ValidationError):

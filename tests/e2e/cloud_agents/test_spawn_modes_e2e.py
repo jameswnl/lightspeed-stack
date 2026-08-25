@@ -18,8 +18,10 @@ Ephemeral tests need an OpenShell gateway configured with:
 
 See ~/ws/local-infra/kind/openshell-gateway.yaml for a working example
 (gateway running as a Kind pod, spawning sandboxes via Podman DooD).
-Point OPENSHELL_GATEWAY_URL at that gateway (default: port 9080, per
-`make kind-openshell-up` in ~/ws/local-infra).
+Default OPENSHELL_GATEWAY_URL is localhost:17670, matching
+cloud_agents.spawner.factory's own default. Override with
+OPENSHELL_GATEWAY_URL=localhost:9080 for `make kind-openshell-up` in
+~/ws/local-infra (its Service uses a non-default port).
 
 Usage:
     uv run pytest tests/e2e/cloud_agents/test_spawn_modes_e2e.py -v -s
@@ -41,8 +43,10 @@ pytestmark = pytest.mark.skipif(
 )
 
 _PROVIDER = {"name": "openai", "model": "gpt-4o-mini"}
-_SANDBOX_IMAGE = "localhost/lightspeed-agentic-sandbox:latest"
-_OPENSHELL_ENDPOINT = os.environ.get("OPENSHELL_GATEWAY_URL", "localhost:9080")
+_SANDBOX_IMAGE = os.environ.get(
+    "LIGHTSPEED_SANDBOX_IMAGE", "quay.io/jameswong/lightspeed-agentic-sandbox:latest"
+)
+_OPENSHELL_ENDPOINT = os.environ.get("OPENSHELL_GATEWAY_URL", "localhost:17670")
 
 
 @pytest.fixture(name="openshell_spawner")

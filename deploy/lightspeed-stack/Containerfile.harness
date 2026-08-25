@@ -1,0 +1,44 @@
+# vim: set filetype=dockerfile
+#
+# Harness-only overlay: adds the lightspeed-cloud-agents editable dependency
+# on top of the base lightspeed-stack image, so the workflow/agents endpoints
+# (spawn:ephemeral, OpenShellSpawner, etc.) work in a deployed container.
+#
+# Not used for the official product image -- that one (Containerfile) has no
+# cloud_agents dependency at all, since these endpoints are harness/PoC-only.
+#
+# IMPORTANT: BASE_IMAGE must be built on UBI10, not the official
+# Containerfile's UBI9 default. openshell's published wheels require
+# glibc 2.39+ (manylinux_2_39); UBI9 ships glibc 2.34, UBI10 ships 2.39.
+# Building this overlay on a UBI9-based BASE_IMAGE fails at the pip
+# install step below with a confusing "no matching distribution" error
+# for the openshell package specifically (other deps resolve fine).
+#
+# Build (from the lightspeed-stack repo root):
+#   podman build --platform linux/arm64 \
+#     --build-arg BUILDER_BASE_IMAGE=registry.access.redhat.com/ubi10/python-312-minimal \
+#     --build-arg BUILDER_DNF_COMMAND=microdnf \
+#     --build-arg RUNTIME_BASE_IMAGE=registry.access.redhat.com/ubi10/python-312-minimal \
+#     --build-arg RUNTIME_DNF_COMMAND=microdnf \
+#     -f deploy/lightspeed-stack/Containerfile -t localhost/lightspeed-stack:kind-test .
+#   podman build \
+#     --build-context cloud_agents=~/ws/lightspeed-cloud-agents \
+#     -f deploy/lightspeed-stack/Containerfile.harness \
+#     -t localhost/lightspeed-stack:kind-test-harness .
+
+ARG BASE_IMAGE=localhost/lightspeed-stack:kind-test
+
+FROM ${BASE_IMAGE}
+
+USER root
+
+COPY --from=cloud_agents src /opt/lightspeed-cloud-agents/src
+COPY --from=cloud_agents pyproject.toml README.md LICENSE /opt/lightspeed-cloud-agents/
+
+RUN /app-root/.venv/bin/python3.12 -m ensurepip && \
+    /app-root/.venv/bin/python3.12 -m pip install --no-cache-dir \
+    "/opt/lightspeed-cloud-agents[local,kubernetes,openshell]" && \
+    rm -rf /opt/lightspeed-cloud-agents && \
+    chown -R 1001:1001 /app-root/.venv
+
+USER 1001

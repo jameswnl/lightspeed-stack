@@ -14,6 +14,8 @@ from log import get_logger
 from models.api.requests.agents import ApproveWorkflowRequest, RunWorkflowRequest
 from models.config import Action
 from utils.endpoints import check_configuration_loaded
+from workflow.provider_credentials import credentials_secret_for
+from workflow.spawner_factory import build_spawner
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["workflows"])
@@ -43,7 +45,9 @@ def _get_executor() -> Any:
 
     from workflow.executor_factory import create_workflow_runner
 
-    _executor = create_workflow_runner()
+    spawner_config = configuration.spawner_configuration
+    spawner = build_spawner(spawner_config) if spawner_config else None
+    _executor = create_workflow_runner(spawner=spawner)
     return _executor
 
 
@@ -78,11 +82,22 @@ async def start_workflow_handler(
         "name": inference.default_provider or "",
         "model": inference.default_model or "",
     }
+    if "credentials_secret" not in provider:
+        cred_secret = credentials_secret_for(provider.get("name") or "")
+        if cred_secret:
+            provider["credentials_secret"] = cred_secret
+
+    spawner_config = configuration.spawner_configuration
+    default_sandbox_image = (
+        spawner_config.sandbox_image  # pylint: disable=no-member
+        if spawner_config
+        else "lightspeed-agentic-sandbox:latest"
+    )
 
     workflow_input = {
         "definition": body.definition,
         "provider": provider,
-        "sandbox_image": body.sandbox_image or "lightspeed-agentic-sandbox:latest",
+        "sandbox_image": body.sandbox_image or default_sandbox_image,
         "approval_policy": body.approval_policy,
         "session_id": body.session_id,
         "user_id": user_id,

@@ -18,6 +18,8 @@ def mock_config_fixture(mocker: MockerFixture) -> Any:
     """Mock the configuration singleton."""
     mock_cfg = mocker.patch("app.endpoints.agents.configuration")
     mock_cfg.spawner_configuration = None
+    mock_cfg.inference.default_provider = None
+    mock_cfg.inference.default_model = None
     return mock_cfg
 
 
@@ -109,6 +111,8 @@ class TestRunAgentHandler:
         mock_cfg = mocker.patch("app.endpoints.agents.configuration")
         spawner_config = mocker.MagicMock()
         mock_cfg.spawner_configuration = spawner_config
+        mock_cfg.inference.default_provider = None
+        mock_cfg.inference.default_model = None
 
         fake_spawner = mocker.MagicMock()
         mock_build_spawner = mocker.patch(
@@ -162,6 +166,8 @@ class TestRunAgentHandler:
         spawner_config = mocker.MagicMock()
         spawner_config.sandbox_image = "default-sandbox:latest"
         mock_cfg.spawner_configuration = spawner_config
+        mock_cfg.inference.default_provider = None
+        mock_cfg.inference.default_model = None
         mocker.patch(
             "app.endpoints.agents.build_spawner", return_value=mocker.MagicMock()
         )
@@ -200,6 +206,8 @@ class TestRunAgentHandler:
         spawner_config = mocker.MagicMock()
         spawner_config.sandbox_image = "default-sandbox:latest"
         mock_cfg.spawner_configuration = spawner_config
+        mock_cfg.inference.default_provider = None
+        mock_cfg.inference.default_model = None
         mocker.patch(
             "app.endpoints.agents.build_spawner", return_value=mocker.MagicMock()
         )
@@ -232,6 +240,8 @@ class TestRunAgentHandler:
         spawner_config = mocker.MagicMock()
         spawner_config.sandbox_image = "default-sandbox:latest"
         mock_cfg.spawner_configuration = spawner_config
+        mock_cfg.inference.default_provider = None
+        mock_cfg.inference.default_model = None
         mocker.patch(
             "app.endpoints.agents.build_spawner", return_value=mocker.MagicMock()
         )
@@ -262,6 +272,8 @@ class TestRunAgentHandler:
         spawner_config = mocker.MagicMock()
         spawner_config.sandbox_image = "default-sandbox:latest"
         mock_cfg.spawner_configuration = spawner_config
+        mock_cfg.inference.default_provider = None
+        mock_cfg.inference.default_model = None
         mocker.patch(
             "app.endpoints.agents.build_spawner", return_value=mocker.MagicMock()
         )
@@ -316,3 +328,94 @@ class TestRunAgentHandler:
             await run_agent_handler.__wrapped__(request, body, auth)
 
         assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_configured_default_provider_and_model(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """Omitted provider/model fall back to inference.default_provider/model.
+
+        Regression test: the docstring for AgentRunRequest.model promises a
+        fallback to inference.default_model (mirroring
+        start_workflow_handler's behavior for RunWorkflowRequest.provider),
+        but the handler used to hardcode `body.provider or ""` /
+        `body.model or ""` with no fallback, silently producing
+        {"name": "", "model": ""} and a confusing "Unknown provider ''"
+        error deep in cloud_agents even when defaults were configured.
+        """
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        mock_config.inference.default_provider = "openai"
+        mock_config.inference.default_model = "gpt-4o-mini"
+
+        body = AgentRunRequest(prompt="Analyze the cluster")
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await run_agent_handler.__wrapped__(request, body, auth)
+
+        call_args = mock_executor.run.call_args[0][0]
+        assert call_args.provider["name"] == "openai"
+        assert call_args.provider["model"] == "gpt-4o-mini"
+
+    @pytest.mark.asyncio
+    async def test_explicit_provider_and_model_override_configured_defaults(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """Explicit provider/model in the request take priority over defaults."""
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        mock_config.inference.default_provider = "openai"
+        mock_config.inference.default_model = "gpt-4o-mini"
+
+        body = AgentRunRequest(
+            prompt="Analyze the cluster",
+            provider="anthropic",
+            model="claude-sonnet-5",
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await run_agent_handler.__wrapped__(request, body, auth)
+
+        call_args = mock_executor.run.call_args[0][0]
+        assert call_args.provider["name"] == "anthropic"
+        assert call_args.provider["model"] == "claude-sonnet-5"
+
+    @pytest.mark.asyncio
+    async def test_ephemeral_credentials_secret_uses_default_provider_fallback(
+        self,
+        mocker: MockerFixture,
+        mock_executor: Any,
+    ) -> None:
+        """Ephemeral credentials_secret resolution honors the fallback provider.
+
+        Regression test: cred_secret used to be derived from raw
+        `body.provider or ""`, so a configured default_provider had no
+        effect on which credentials env var got threaded into the sandbox.
+        """
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        mock_cfg = mocker.patch("app.endpoints.agents.configuration")
+        spawner_config = mocker.MagicMock()
+        spawner_config.sandbox_image = "default-sandbox:latest"
+        mock_cfg.spawner_configuration = spawner_config
+        mock_cfg.inference.default_provider = "anthropic"
+        mock_cfg.inference.default_model = "claude-sonnet-5"
+        mocker.patch(
+            "app.endpoints.agents.build_spawner", return_value=mocker.MagicMock()
+        )
+
+        body = AgentRunRequest(prompt="Fix the issue", spawn="ephemeral")
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await run_agent_handler.__wrapped__(request, body, auth)
+
+        call_args = mock_executor.run.call_args[0][0]
+        assert call_args.provider["name"] == "anthropic"
+        assert call_args.provider["model"] == "claude-sonnet-5"
+        assert call_args.provider["credentials_secret"] == "ANTHROPIC_API_KEY"

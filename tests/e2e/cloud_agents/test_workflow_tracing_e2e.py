@@ -7,17 +7,19 @@ jameswnl/lightspeed-cloud-agents#179 for the companion cloud-agents issue.
 
 LocalWorkflowRunner already wraps every agent step's executor with
 MiddlewareExecutor(..., tracer=_tracer) (graph_translator.py), which opens a
-real `step.execute` span per step tagged with `workflow.id`/`step.name`. What
+real `step.execute` span per step tagged with `workflow.id`/`step.name`, and
+(since jameswnl/lightspeed-cloud-agents#181) `session.id` when provided. What
 this test actually verifies is open, not assumed:
 
-1. Every step span for a run carries the correct `workflow.id` attribute
-   (expected to already work).
+1. Every step span for a run carries the correct `workflow.id` and
+   `session.id` attributes (expected to already work).
 2. Whether all step spans of one live (non-paused) run share a single
-   trace_id (genuinely unverified — see cloud-agents#179 item 3).
+   trace_id (genuinely unverified — see cloud-agents#179 item 3, still
+   open; unrelated to and not addressed by #181).
 3. Whether workflow.id still correlates spans across an approval
-   pause/resume boundary, and whether they land in one trace or two
-   (cloud-agents#179 item 2 — the resumed run is expected to start a new
-   trace until that issue's span-link work lands).
+   pause/resume boundary, and whether a post-resume span carries an OTEL
+   span Link back to the pre-pause trace (cloud-agents#179 item 2 --
+   implemented in #181, asserted for real below).
 
 Requires:
 - OPENAI_API_KEY environment variable
@@ -221,17 +223,23 @@ async def _poll_until_status(
         await asyncio.sleep(0.5)
 
 
-async def _start_and_await_completion(runner: Any, definition: dict[str, Any]) -> str:
+async def _start_and_await_completion(
+    runner: Any, definition: dict[str, Any], session_id: str | None = None
+) -> str:
     """Start a workflow run and poll until it reaches a terminal status.
 
     Parameters:
         runner: LocalWorkflowRunner instance.
         definition: Workflow definition dict.
+        session_id: Optional session_id to thread into the run's input.
 
     Returns:
         The new run's workflow_id, once it has completed.
     """
-    workflow_id = await runner.start({"definition": definition, "provider": _PROVIDER})
+    start_input = {"definition": definition, "provider": _PROVIDER}
+    if session_id is not None:
+        start_input["session_id"] = session_id
+    workflow_id = await runner.start(start_input)
     status = await _poll_until_status(
         runner, workflow_id, {"completed", "failed", "cancelled"}
     )
@@ -257,6 +265,25 @@ def _assert_workflow_id_tag(spans: list[dict[str, Any]], workflow_id: str) -> No
         )
 
 
+def _assert_session_id_tag(spans: list[dict[str, Any]], session_id: str) -> None:
+    """Assert every span in the list carries the expected session.id tag.
+
+    Set by cloud-agents' TracingMiddleware (workflow/executor/middleware.py)
+    when StepMetadata.session_id is non-None -- see cloud-agents#179 item 1 /
+    jameswnl/lightspeed-cloud-agents#181.
+
+    Parameters:
+        spans: Span dicts (e.g. from spans_with_operation()).
+        session_id: Expected value of the session.id tag.
+    """
+    for span in spans:
+        tags = {t["key"]: t["value"] for t in span.get("tags", [])}
+        assert tags.get("session.id") == session_id, (
+            f"Span {span.get('spanID')} ({span.get('operationName')}) has "
+            f"session.id={tags.get('session.id')!r}, expected {session_id!r}"
+        )
+
+
 class TestNoPauseWorkflowTracing:
     """Trace chaining for a workflow run with no approval pause."""
 
@@ -264,14 +291,16 @@ class TestNoPauseWorkflowTracing:
     async def test_steps_share_workflow_id_and_trace_id(
         self, tracer: Any, run_state_store: Any
     ) -> None:
-        """Every step span carries workflow.id; steps ideally share trace_id.
+        """Every step span carries workflow.id/session.id; steps ideally share trace_id.
 
-        The workflow.id assertion is expected to already hold (see
-        graph_translator.py's MiddlewareExecutor wiring). The shared
-        trace_id assertion is a real, currently-unverified question —
-        LocalWorkflowRunner.start() fires the run via asyncio.create_task(),
-        and whether that preserves a single trace across all step spans
-        with no caller-provided span is what this test exists to answer.
+        The workflow.id and session.id assertions are expected to already
+        hold (see graph_translator.py's MiddlewareExecutor wiring and
+        jameswnl/lightspeed-cloud-agents#181 for session.id specifically).
+        The shared trace_id assertion is a real, currently-unverified
+        question -- LocalWorkflowRunner.start() fires the run via
+        asyncio.create_task(), and whether that preserves a single trace
+        across all step spans with no caller-provided span is what this
+        test exists to answer.
         """
         _ = tracer
         if not await check_jaeger_available():
@@ -283,7 +312,10 @@ class TestNoPauseWorkflowTracing:
 
         runner = LocalWorkflowRunner(run_state_store=run_state_store)
         definition = _two_step_definition("e2e-tracing-no-pause")
-        workflow_id = await _start_and_await_completion(runner, definition)
+        session_id = "ses-e2e-tracing-no-pause"
+        workflow_id = await _start_and_await_completion(
+            runner, definition, session_id=session_id
+        )
 
         await asyncio.sleep(2)
 
@@ -302,6 +334,7 @@ class TestNoPauseWorkflowTracing:
             f"in Jaeger, found {len(step_spans)}."
         )
         _assert_workflow_id_tag(step_spans, workflow_id)
+        _assert_session_id_tag(step_spans, session_id)
 
         trace_ids = {t["traceID"] for t in traces}
         assert len(trace_ids) == 1, (
@@ -393,26 +426,22 @@ class TestPauseResumeWorkflowTracing:
     and whether a resumed run's span links back to the pre-pause trace)
     against one real, LLM-backed run of the triage-classify workflow --
     that run isn't free, and there's no reason to pay for it twice to
-    check two independent things about the same execution's traces. The
-    second half uses an imperative pytest.xfail() (not a `@pytest.mark`
-    decorator) so a failure in the first half still reports as a real
-    failure rather than being masked as an expected one.
+    check two independent things about the same execution's traces.
     """
 
     @pytest.mark.asyncio
     async def test_pause_resume_tracing(
         self, tracer: Any, run_state_store: Any
     ) -> None:
-        """workflow.id correlation must hold; the resume span-link may not yet.
+        """workflow.id correlation and the resume span-link must both hold.
 
-        Pre-pause and post-resume spans are expected to land in separate
-        traces today, since nothing persists/restores OTEL context across
-        the pause (see cloud-agents#179 item 2) -- the correlation
-        mechanism that reliably works today is the shared workflow.id tag,
+        Pre-pause and post-resume spans land in separate traces (nothing
+        keeps live OTEL context across a real pause) -- the correlation
+        mechanism that ties them together is the shared workflow.id tag,
         asserted for real below (including at the individual-span level,
-        not just via the Jaeger tag-query filter). Whether a post-resume
-        span additionally carries an OTEL span Link back to the pre-pause
-        trace is the part still blocked on cloud-agents#179 item 2 landing.
+        not just via the Jaeger tag-query filter), plus an OTEL span Link
+        from the first post-resume span back to the pre-pause trace, per
+        jameswnl/lightspeed-cloud-agents#181 (cloud-agents#179 item 2).
         """
         _ = tracer
         if not await check_jaeger_available():
@@ -443,12 +472,10 @@ class TestPauseResumeWorkflowTracing:
             for ref in span.get("references", [])
         }
 
-        if not linked_trace_ids & pre_pause_trace_ids:
-            pytest.xfail(
-                "blocked on cloud-agents#179 item 2 (trace continuity across "
-                "resume) -- LocalWorkflowRunner does not yet persist/replay "
-                "a traceparent across pause/resume, so the resumed run's "
-                "spans carry no link back to the pre-pause trace. Observed "
-                f"reference trace_ids: {sorted(filter(None, linked_trace_ids))}, "
-                f"pre-pause trace_ids: {sorted(pre_pause_trace_ids)}."
-            )
+        assert linked_trace_ids & pre_pause_trace_ids, (
+            "Expected a post-resume span to carry an OTEL span Link back to "
+            "the pre-pause trace (jameswnl/lightspeed-cloud-agents#181, "
+            "cloud-agents#179 item 2). Observed reference trace_ids: "
+            f"{sorted(filter(None, linked_trace_ids))}, pre-pause trace_ids: "
+            f"{sorted(pre_pause_trace_ids)}."
+        )

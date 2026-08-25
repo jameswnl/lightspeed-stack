@@ -2,7 +2,7 @@
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AgentRunRequest(BaseModel):
@@ -84,6 +84,7 @@ class RunWorkflowRequest(BaseModel):
         provider: Default LLM provider config for all steps.
         sandbox_image: Default sandbox image for ephemeral steps.
         approval_policy: Optional approval policy.
+        session_id: Optional caller-provided ID grouping related workflow runs.
     """
 
     definition: dict[str, Any] = Field(
@@ -105,6 +106,24 @@ class RunWorkflowRequest(BaseModel):
         None,
         description="Approval policy for human-approval steps.",
     )
+
+    session_id: Optional[str] = Field(
+        None,
+        description="Caller-provided ID grouping related workflow runs.",
+    )
+
+    @field_validator("session_id")
+    @classmethod
+    def normalize_session_id(cls, value: Optional[str]) -> Optional[str]:
+        """Treat an empty string session_id the same as omitted.
+
+        Parameters:
+            value: Raw session_id from the request; may be None or empty.
+
+        Returns:
+            None if the value is empty, otherwise the original value.
+        """
+        return value or None
 
 
 class ApproveWorkflowRequest(BaseModel):

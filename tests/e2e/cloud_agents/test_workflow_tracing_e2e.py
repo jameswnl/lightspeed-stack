@@ -3,19 +3,23 @@
 Companion to test_otel_tracing_e2e.py (which covers ChatWorkflowRunner) —
 this file covers the workflow-runner path (LocalWorkflowRunner, i.e.
 /v1/workflows/*). See jameswnl/lightspeed-stack#20 for full context and
-jameswnl/lightspeed-cloud-agents#179 for the companion cloud-agents issue.
+jameswnl/lightspeed-cloud-agents#179 for the originating cloud-agents issue
+(split into #181 and #183, both now resolved).
 
 LocalWorkflowRunner already wraps every agent step's executor with
 MiddlewareExecutor(..., tracer=_tracer) (graph_translator.py), which opens a
 real `step.execute` span per step tagged with `workflow.id`/`step.name`, and
-(since jameswnl/lightspeed-cloud-agents#181) `session.id` when provided. What
-this test actually verifies is open, not assumed:
+(since jameswnl/lightspeed-cloud-agents#181) `session.id` when provided.
+LocalWorkflowRunner._execute() also opens a `workflow.execute` span around
+the whole method body (since jameswnl/lightspeed-cloud-agents#185, closing
+#183), so every step's span nests under it and shares its trace_id. What
+this test verifies:
 
 1. Every step span for a run carries the correct `workflow.id` and
-   `session.id` attributes (expected to already work).
-2. Whether all step spans of one live (non-paused) run share a single
-   trace_id (genuinely unverified — see cloud-agents#179 item 3, still
-   open; unrelated to and not addressed by #181).
+   `session.id` attributes.
+2. All step spans of one live (non-paused) run share a single trace_id
+   (cloud-agents#183, fixed by #185 -- previously each step opened as an
+   independent root span/trace).
 3. Whether workflow.id still correlates spans across an approval
    pause/resume boundary, and whether a post-resume span carries an OTEL
    span Link back to the pre-pause trace (cloud-agents#179 item 2 --
@@ -292,16 +296,14 @@ class TestNoPauseWorkflowTracing:
     async def test_steps_share_workflow_id_and_trace_id(
         self, tracer: Any, run_state_store: Any
     ) -> None:
-        """Every step span carries workflow.id/session.id; steps ideally share trace_id.
+        """Every step span carries workflow.id/session.id and shares one trace_id.
 
-        The workflow.id and session.id assertions are expected to already
-        hold (see graph_translator.py's MiddlewareExecutor wiring and
-        jameswnl/lightspeed-cloud-agents#181 for session.id specifically).
-        The shared trace_id assertion is a real, currently-unverified
-        question -- LocalWorkflowRunner.start() fires the run via
-        asyncio.create_task(), and whether that preserves a single trace
-        across all step spans with no caller-provided span is what this
-        test exists to answer.
+        workflow.id and session.id are set by graph_translator.py's
+        MiddlewareExecutor wiring (session.id since
+        jameswnl/lightspeed-cloud-agents#181). The shared trace_id is set by
+        LocalWorkflowRunner._execute()'s enclosing `workflow.execute` span
+        (jameswnl/lightspeed-cloud-agents#185, closing cloud-agents#183) --
+        before that fix, each step opened as an independent root span/trace.
         """
         _ = tracer
         if not await check_jaeger_available():
@@ -340,10 +342,10 @@ class TestNoPauseWorkflowTracing:
         trace_ids = {t["traceID"] for t in traces}
         assert len(trace_ids) == 1, (
             f"Expected all step spans of workflow {workflow_id} to share one "
-            f"trace_id, found {len(trace_ids)}: {sorted(trace_ids)}. If this "
-            "fails, LocalWorkflowRunner's asyncio.create_task()-based "
-            "execution is not preserving a single trace across steps for a "
-            "live run -- see jameswnl/lightspeed-cloud-agents#179 item 3."
+            f"trace_id, found {len(trace_ids)}: {sorted(trace_ids)}. This "
+            "would be a regression of LocalWorkflowRunner's enclosing "
+            "`workflow.execute` span -- see "
+            "jameswnl/lightspeed-cloud-agents#183 / #185."
         )
 
 

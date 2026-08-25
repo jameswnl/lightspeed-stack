@@ -268,8 +268,9 @@ def _assert_workflow_id_tag(spans: list[dict[str, Any]], workflow_id: str) -> No
 def _assert_session_id_tag(spans: list[dict[str, Any]], session_id: str) -> None:
     """Assert every span in the list carries the expected session.id tag.
 
-    Set by cloud-agents' TracingMiddleware (workflow/executor/middleware.py)
-    when StepMetadata.session_id is non-None -- see cloud-agents#179 item 1 /
+    Set by cloud-agents' MiddlewareExecutor._span_attributes()
+    (workflow/executor/middleware.py) when StepMetadata.session_id is
+    non-None -- see cloud-agents#179 item 1 /
     jameswnl/lightspeed-cloud-agents#181.
 
     Parameters:
@@ -346,28 +347,26 @@ class TestNoPauseWorkflowTracing:
         )
 
 
-async def _run_paused_then_resumed_workflow(
-    run_state_store: Any,
-) -> tuple[str, set[str], set[str]]:
-    """Run the triage-classify workflow through a real pause and resume.
+async def _start_and_reach_pause(
+    run_state_store: Any, definition: dict[str, Any], session_id: str | None
+) -> tuple[Any, str, set[str]]:
+    """Start a workflow, wait for it to pause, and assert pre-pause span tags.
 
     Parameters:
         run_state_store: Real RunStateStore backing the run.
+        definition: Workflow definition dict (must contain an approval step).
+        session_id: Optional session_id to thread into the run's input.
 
     Returns:
-        Tuple of (workflow_id, pre_pause_trace_ids, post_resume_trace_ids).
+        Tuple of (runner, workflow_id, pre_pause_trace_ids).
     """
-    wf_path = _WF_DIR / "triage-classify-workflow.yaml"
-    if not wf_path.exists():
-        pytest.skip("lightspeed-cloud-agents examples not found")
-    definition = yaml.safe_load(wf_path.read_text(encoding="utf-8"))
-
-    from cloud_agents.workflow.executor.base import ApprovalDecision
     from cloud_agents.workflow.executor.local.executor import LocalWorkflowRunner
 
     runner = LocalWorkflowRunner(run_state_store=run_state_store)
-
-    workflow_id = await runner.start({"definition": definition, "provider": _PROVIDER})
+    start_input = {"definition": definition, "provider": _PROVIDER}
+    if session_id is not None:
+        start_input["session_id"] = session_id
+    workflow_id = await runner.start(start_input)
     status = await _poll_until_status(
         runner, workflow_id, {"paused", "completed", "failed", "cancelled"}
     )
@@ -387,7 +386,37 @@ async def _run_paused_then_resumed_workflow(
         f"workflow.id={workflow_id} before pause"
     )
     _assert_workflow_id_tag(pre_pause_step_spans, workflow_id)
-    pre_pause_trace_ids = {t["traceID"] for t in pre_pause_traces}
+    if session_id is not None:
+        _assert_session_id_tag(pre_pause_step_spans, session_id)
+
+    return runner, workflow_id, {t["traceID"] for t in pre_pause_traces}
+
+
+async def _run_paused_then_resumed_workflow(
+    run_state_store: Any, session_id: str | None = None
+) -> tuple[str, set[str], set[str]]:
+    """Run the triage-classify workflow through a real pause and resume.
+
+    Parameters:
+        run_state_store: Real RunStateStore backing the run.
+        session_id: Optional session_id to thread into the run's input --
+            asserted on both pre-pause and post-resume spans when given, to
+            catch an identity-drop bug class across the pause boundary
+            (the kind #181 fixed for the trace-link mechanism).
+
+    Returns:
+        Tuple of (workflow_id, pre_pause_trace_ids, post_resume_trace_ids).
+    """
+    wf_path = _WF_DIR / "triage-classify-workflow.yaml"
+    if not wf_path.exists():
+        pytest.skip("lightspeed-cloud-agents examples not found")
+    definition = yaml.safe_load(wf_path.read_text(encoding="utf-8"))
+
+    runner, workflow_id, pre_pause_trace_ids = await _start_and_reach_pause(
+        run_state_store, definition, session_id
+    )
+
+    from cloud_agents.workflow.executor.base import ApprovalDecision
 
     await runner.approve(
         workflow_id,
@@ -410,9 +439,10 @@ async def _run_paused_then_resumed_workflow(
         operation="step.execute",
         tags={"workflow.id": workflow_id},
     )
-    _assert_workflow_id_tag(
-        spans_with_operation(all_traces, "step.execute"), workflow_id
-    )
+    all_step_spans = spans_with_operation(all_traces, "step.execute")
+    _assert_workflow_id_tag(all_step_spans, workflow_id)
+    if session_id is not None:
+        _assert_session_id_tag(all_step_spans, session_id)
     all_trace_ids = {t["traceID"] for t in all_traces}
     post_resume_trace_ids = all_trace_ids - pre_pause_trace_ids
 
@@ -448,7 +478,9 @@ class TestPauseResumeWorkflowTracing:
             pytest.skip("Jaeger not available")
 
         workflow_id, pre_pause_trace_ids, post_resume_trace_ids = (
-            await _run_paused_then_resumed_workflow(run_state_store)
+            await _run_paused_then_resumed_workflow(
+                run_state_store, session_id="ses-e2e-pause-resume"
+            )
         )
 
         assert post_resume_trace_ids, (
@@ -470,6 +502,7 @@ class TestPauseResumeWorkflowTracing:
             ref.get("traceID")
             for span in post_resume_spans
             for ref in span.get("references", [])
+            if ref.get("refType") == "FOLLOWS_FROM"
         }
 
         assert linked_trace_ids & pre_pause_trace_ids, (

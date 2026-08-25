@@ -2,10 +2,19 @@
 
 Requires:
 - OPENAI_API_KEY environment variable
+- OTEL_ANONYMIZATION_SECRET environment variable (any value; see
+  docker-compose.yaml for the dev default) — the tracing middleware
+  refuses to run without it since it HMACs user_id before adding it
+  as a span attribute
 - Jaeger running at localhost:4317 (OTLP) and localhost:16686 (query API)
+- PostgreSQL reachable at WORKFLOW_PG_* (default: localhost:5432/lightspeed,
+  see docker-compose-harness.yaml); ChatWorkflowRunner requires a real
+  RunStateStore/TranscriptStore, which the fixture below sets up
+  (schema is migrated automatically on connect via Alembic)
 
 Usage:
     OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
+    OTEL_ANONYMIZATION_SECRET=lightspeed-stack-otel-anonymization-dev-default \
     uv run pytest tests/e2e/cloud_agents/test_otel_tracing_e2e.py -v -s
 """
 
@@ -15,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -30,6 +40,46 @@ pytestmark = [
 JAEGER_QUERY_URL = os.environ.get("JAEGER_QUERY_URL", "http://localhost:16686")
 OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
 SERVICE_NAME = "lightspeed-stack-e2e-test"
+
+_PG_HOST = os.environ.get("WORKFLOW_PG_HOST", "localhost")
+_PG_PORT = int(os.environ.get("WORKFLOW_PG_PORT", "5432"))
+_PG_DB = os.environ.get("WORKFLOW_PG_DB", "lightspeed")
+_PG_USER = os.environ.get("WORKFLOW_PG_USER", "lightspeed")
+_PG_PASSWORD = os.environ.get("WORKFLOW_PG_PASSWORD", "lightspeed")
+
+
+@pytest.fixture(name="workflow_storage", autouse=True)
+async def workflow_storage_fixture() -> AsyncIterator[None]:
+    """Initialize WorkflowStorageFactory so ChatWorkflowRunner has a real store.
+
+    execute_query_via_direct_executor() always routes through
+    ChatWorkflowRunner, which requires a connected RunStateStore /
+    TranscriptStore. Outside the FastAPI lifespan (main.py) nothing
+    initializes WorkflowStorageFactory, so it must be done here.
+    """
+    from models.config import (
+        PostgreSQLDatabaseConfiguration,
+        WorkflowEngineConfiguration,
+    )
+    from workflow.query_executor import reset_runner
+    from workflow.storage import WorkflowStorageFactory
+
+    pg_config = PostgreSQLDatabaseConfiguration(
+        host=_PG_HOST,
+        port=_PG_PORT,
+        db=_PG_DB,
+        user=_PG_USER,
+        password=_PG_PASSWORD,
+    )
+    wf_config = WorkflowEngineConfiguration(enabled=True)
+
+    reset_runner()
+    await WorkflowStorageFactory.initialize(pg_config, wf_config)
+
+    yield
+
+    reset_runner()
+    await WorkflowStorageFactory.cleanup()
 
 
 @pytest.fixture(name="tracer", scope="module")

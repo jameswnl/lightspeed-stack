@@ -6,6 +6,13 @@ Tests agent execution across all three isolation tiers against real LLMs.
 - spawn:local — subprocess (always available)
 - spawn:ephemeral — OpenShell gateway (requires gateway + sandbox image)
 
+Ephemeral tests need an OpenShell gateway with a fully configured
+[openshell.drivers.podman] block (grpc_endpoint, supervisor_image,
+default_image) so sandboxes can fetch their auth token/policy on boot —
+see ~/ws/local-infra/gateway.toml for a working example. Point
+OPENSHELL_GATEWAY_URL at that gateway (default: local-infra's gRPC/HTTP
+port, 8080).
+
 Usage:
     uv run pytest tests/e2e/cloud_agents/test_spawn_modes_e2e.py -v -s
 """
@@ -27,7 +34,7 @@ pytestmark = pytest.mark.skipif(
 
 _PROVIDER = {"name": "openai", "model": "gpt-4o-mini"}
 _SANDBOX_IMAGE = "localhost/lightspeed-agentic-sandbox:latest"
-_OPENSHELL_ENDPOINT = os.environ.get("OPENSHELL_GATEWAY_URL", "localhost:17670")
+_OPENSHELL_ENDPOINT = os.environ.get("OPENSHELL_GATEWAY_URL", "localhost:8080")
 
 
 @pytest.fixture(name="openshell_spawner")

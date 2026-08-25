@@ -100,7 +100,7 @@ def test_spawner_configuration_openshell_defaults() -> None:
     )
     assert config.type == "openshell"
     assert config.openshell_gateway_url == "localhost:9080"
-    assert config.openshell_driver == "kubernetes"
+    assert config.openshell_driver == "podman"
     assert config.openshell_workspace == "default"
     assert config.openshell_tls_ca is None
     assert config.openshell_tls_cert is None

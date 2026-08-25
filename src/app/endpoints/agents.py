@@ -6,11 +6,6 @@ from typing import Annotated, Any
 
 from cloud_agents.workflow.executor.step.base import StepInput, StepMetadata
 from cloud_agents.workflow.executor.step.dispatch import get_step_executor
-
-# pylint: disable-next=protected-access
-from cloud_agents.workflow.executor.step.provider import (
-    _PROVIDER_ENV_KEYS as PROVIDER_ENV_KEYS,
-)
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from authentication import get_auth_dependency
@@ -21,6 +16,7 @@ from log import get_logger
 from models.api.requests.agents import AgentRunRequest
 from models.config import Action
 from utils.endpoints import check_configuration_loaded
+from workflow.provider_credentials import credentials_secret_for
 from workflow.spawner_factory import build_spawner
 
 logger = get_logger(__name__)
@@ -77,9 +73,9 @@ async def run_agent_handler(
             )
         spawner = build_spawner(spawner_config)
         sandbox_image = body.sandbox_image or spawner_config.sandbox_image
-        provider["credentials_secret"] = PROVIDER_ENV_KEYS.get(
-            body.provider or "", "OPENAI_API_KEY"
-        )
+        cred_secret = credentials_secret_for(body.provider or "")
+        if cred_secret:
+            provider["credentials_secret"] = cred_secret
 
     executor = get_step_executor(step_def, spawner=spawner)
 

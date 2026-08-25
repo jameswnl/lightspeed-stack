@@ -3,6 +3,10 @@
 Thin adapter: translates lightspeed-stack's own Pydantic SpawnerConfiguration
 into the plain-kwargs call cloud_agents.spawner.factory.build_spawner()
 expects, mirroring the WorkflowStorageFactory pattern in workflow/storage.py.
+
+The built spawner is cached for the process lifetime (see build_spawner()
+below) -- a config reload will not rebuild it or pick up a new gateway URL
+without an explicit reset_spawner() call.
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ def build_spawner(spawner_config: SpawnerConfiguration) -> Any:
             gateway_url=spawner_config.openshell_gateway_url,
             driver=spawner_config.openshell_driver,
             workspace=spawner_config.openshell_workspace,
+            http_endpoint=spawner_config.openshell_http_endpoint or "",
             tls_ca=(
                 str(spawner_config.openshell_tls_ca)
                 if spawner_config.openshell_tls_ca

@@ -84,6 +84,7 @@ def test_build_spawner_openshell_full_config(mocker: MockerFixture) -> None:
         openshell_gateway_url="localhost:9080",
         openshell_driver="podman",
         openshell_workspace="lcore",
+        openshell_http_endpoint="https://sandboxes.example.com",
         openshell_bearer_token="secret-token",
     )
 
@@ -94,6 +95,7 @@ def test_build_spawner_openshell_full_config(mocker: MockerFixture) -> None:
         gateway_url="localhost:9080",
         driver="podman",
         workspace="lcore",
+        http_endpoint="https://sandboxes.example.com",
         tls_ca="",
         tls_cert="",
         tls_key="",
@@ -114,8 +116,9 @@ def test_build_spawner_openshell_defaults(mocker: MockerFixture) -> None:
     mock.assert_called_once_with(
         "openshell",
         gateway_url="localhost:9080",
-        driver="kubernetes",
+        driver="podman",
         workspace="default",
+        http_endpoint="",
         tls_ca="",
         tls_cert="",
         tls_key="",

@@ -3160,6 +3160,8 @@ class SpawnerConfiguration(ConfigurationBase):
         openshell_gateway_url: OpenShell gateway gRPC endpoint (openshell spawner only).
         openshell_driver: Compute driver the OpenShell gateway itself uses.
         openshell_workspace: OpenShell workspace name.
+        openshell_http_endpoint: Override HTTP proxy endpoint, when split
+            from the gRPC endpoint.
         openshell_tls_ca: CA cert path for the OpenShell gateway connection.
         openshell_tls_cert: Client cert path for mTLS to the OpenShell gateway.
         openshell_tls_key: Client key path for mTLS to the OpenShell gateway.
@@ -3204,16 +3206,25 @@ class SpawnerConfiguration(ConfigurationBase):
     )
 
     openshell_driver: Literal["kubernetes", "podman"] = Field(
-        "kubernetes",
+        "podman",
         title="OpenShell compute driver",
         description="Compute driver the OpenShell gateway itself uses to spawn "
-        "sandboxes (openshell spawner only).",
+        "sandboxes (openshell spawner only). Matches "
+        "cloud_agents.spawner.factory's own default.",
     )
 
     openshell_workspace: str = Field(
         "default",
         title="OpenShell workspace",
         description="OpenShell workspace name (openshell spawner only).",
+    )
+
+    openshell_http_endpoint: Optional[str] = Field(
+        None,
+        title="OpenShell HTTP endpoint",
+        description="Override HTTP proxy endpoint for the OpenShell gateway, "
+        "when gRPC and HTTP are split across different addresses "
+        "(openshell spawner only).",
     )
 
     openshell_tls_ca: Optional[FilePath] = Field(

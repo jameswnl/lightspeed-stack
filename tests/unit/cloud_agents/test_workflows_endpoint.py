@@ -150,6 +150,196 @@ class TestStartWorkflow:
         mock_executor.start.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_credentials_secret_added_for_known_provider(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A known provider gets its credentials_secret env var injected.
+
+        Regression test: start_workflow_handler forwarded body.provider
+        as-is, so an ephemeral step's sandbox never received an LLM API
+        key at all.
+        """
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": []},
+            },
+            provider={"name": "anthropic", "model": "claude-sonnet-5"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["provider"]["credentials_secret"] == "ANTHROPIC_API_KEY"
+
+    @pytest.mark.asyncio
+    async def test_credentials_secret_omitted_for_unknown_provider(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """An unrecognized provider gets no guessed credentials_secret."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": []},
+            },
+            provider={"name": "bedrock", "model": "some-model"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert "credentials_secret" not in workflow_input["provider"]
+
+    @pytest.mark.asyncio
+    async def test_caller_supplied_credentials_secret_not_overridden(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A caller-supplied credentials_secret is preserved as-is."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": []},
+            },
+            provider={
+                "name": "openai",
+                "model": "gpt-4o",
+                "credentials_secret": "MY_CUSTOM_KEY",
+            },
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["provider"]["credentials_secret"] == "MY_CUSTOM_KEY"
+
+    @pytest.mark.asyncio
+    async def test_sandbox_image_falls_back_to_spawner_config(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """sandbox_image falls back to spawner_configuration when unset.
+
+        Regression test: start_workflow_handler hardcoded
+        "lightspeed-agentic-sandbox:latest" regardless of
+        spawner_configuration.sandbox_image.
+        """
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        spawner_config = mocker.MagicMock()
+        spawner_config.sandbox_image = "configured-sandbox:v3"
+        mock_config.spawner_configuration = spawner_config
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": []},
+            },
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["sandbox_image"] == "configured-sandbox:v3"
+
+    @pytest.mark.asyncio
+    async def test_sandbox_image_request_override_wins(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A request-level sandbox_image wins over spawner_configuration."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        spawner_config = mocker.MagicMock()
+        spawner_config.sandbox_image = "configured-sandbox:v3"
+        mock_config.spawner_configuration = spawner_config
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": []},
+            },
+            sandbox_image="custom-sandbox:v9",
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["sandbox_image"] == "custom-sandbox:v9"
+
+    @pytest.mark.asyncio
+    async def test_no_spawner_config_falls_back_to_default_image(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """Without spawner_configuration, falls back to the hardcoded default."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": []},
+            },
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["sandbox_image"] == "lightspeed-agentic-sandbox:latest"
+
+    @pytest.mark.asyncio
     async def test_forwards_session_id(
         self,
         mocker: MockerFixture,

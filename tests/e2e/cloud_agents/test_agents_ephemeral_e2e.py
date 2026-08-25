@@ -6,9 +6,10 @@ spawner=None bug: https://github.com/jameswnl/lightspeed-stack/issues/23.
 
 Requires:
 - OPENAI_API_KEY environment variable
-- A running OpenShell gateway (default: localhost:9080, matching
-  ~/ws/local-infra's Kind-deployed gateway; see test_spawn_modes_e2e.py
-  for setup instructions)
+- A running OpenShell gateway (default: localhost:17670, matching
+  cloud_agents.spawner.factory's own default; override
+  OPENSHELL_GATEWAY_URL=localhost:9080 for ~/ws/local-infra's
+  Kind-deployed gateway -- see test_spawn_modes_e2e.py for setup)
 - cloud_agents.spawner.factory.build_spawner (lightspeed-cloud-agents#182)
   available in the installed editable dependency. `uv sync` has been
   observed to silently drop the editable cloud-agents install (see
@@ -50,7 +51,10 @@ pytestmark = [
 ]
 
 _AUTH: AuthTuple = ("e2e-user", "e2e-tester", False, "")
-_OPENSHELL_GATEWAY_URL = os.environ.get("OPENSHELL_GATEWAY_URL", "localhost:9080")
+_OPENSHELL_GATEWAY_URL = os.environ.get("OPENSHELL_GATEWAY_URL", "localhost:17670")
+_SANDBOX_IMAGE = os.environ.get(
+    "LIGHTSPEED_SANDBOX_IMAGE", "quay.io/jameswong/lightspeed-agentic-sandbox:latest"
+)
 
 _CONFIG = {
     "name": "e2e-agents-ephemeral-test",
@@ -69,15 +73,25 @@ _CONFIG = {
     "spawner": {
         "type": "openshell",
         "openshell_gateway_url": _OPENSHELL_GATEWAY_URL,
-        "openshell_driver": "kubernetes",
-        "sandbox_image": "localhost/lightspeed-agentic-sandbox:latest",
+        "sandbox_image": _SANDBOX_IMAGE,
     },
 }
 
 
 @pytest.fixture(name="e2e_config", scope="module")
 def e2e_config_fixture() -> Any:
-    """Load config with a real openshell spawner section."""
+    """Load config with a real openshell spawner section.
+
+    Skips (rather than erroring) if the gateway isn't reachable, same
+    as test_spawn_modes_e2e.py's openshell_spawner fixture.
+    """
+    try:
+        from openshell import SandboxClient
+
+        SandboxClient(_OPENSHELL_GATEWAY_URL).health()
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        pytest.skip(f"OpenShell gateway not available: {exc}")
+
     configuration.init_from_dict(_CONFIG)
     return configuration
 

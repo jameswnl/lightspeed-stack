@@ -169,6 +169,7 @@ class TestRunAgentHandler:
         body = AgentRunRequest(
             prompt="Fix the issue",
             spawn="ephemeral",
+            provider="openai",
             sandbox_image="custom-sandbox:v2",
         )
         auth = ("user-1", "testuser", False, "token")
@@ -179,6 +180,38 @@ class TestRunAgentHandler:
         call_args = mock_executor.run.call_args[0][0]
         assert call_args.sandbox_image == "custom-sandbox:v2"
         assert call_args.provider["credentials_secret"] == "OPENAI_API_KEY"
+
+    @pytest.mark.asyncio
+    async def test_ephemeral_unknown_provider_omits_credentials_secret(
+        self,
+        mocker: MockerFixture,
+        mock_executor: Any,
+    ) -> None:
+        """spawn=ephemeral with no/unknown provider omits credentials_secret.
+
+        Regression test: a prior version defaulted to "OPENAI_API_KEY"
+        regardless of provider, which would silently stamp the wrong (or a
+        nonexistent) env var name onto the sandbox for any non-OpenAI or
+        misspelled provider. Omitting the key lets the sandbox fail loudly
+        instead of guessing.
+        """
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        mock_cfg = mocker.patch("app.endpoints.agents.configuration")
+        spawner_config = mocker.MagicMock()
+        spawner_config.sandbox_image = "default-sandbox:latest"
+        mock_cfg.spawner_configuration = spawner_config
+        mocker.patch(
+            "app.endpoints.agents.build_spawner", return_value=mocker.MagicMock()
+        )
+
+        body = AgentRunRequest(prompt="Fix the issue", spawn="ephemeral")
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await run_agent_handler.__wrapped__(request, body, auth)
+
+        call_args = mock_executor.run.call_args[0][0]
+        assert "credentials_secret" not in call_args.provider
 
     @pytest.mark.asyncio
     async def test_ephemeral_credentials_secret_matches_provider(

@@ -45,6 +45,14 @@ async def query_jaeger_traces(
 ) -> list[dict[str, Any]]:
     """Query Jaeger for recent traces.
 
+    Note: the `operation` filter selects which *traces* match (a trace
+    matches if any of its spans has that operation name) -- it does not
+    filter which spans are returned within a matched trace. A matched
+    trace's `spans` list can still include other spans (e.g. from
+    auto-instrumented libraries) with different operation names and no
+    `workflow.id` tag. Use `spans_with_operation()` below to filter down
+    to the spans you actually want to assert on.
+
     Parameters:
         service: Service name to query.
         operation: Optional operation (span) name filter.
@@ -73,3 +81,23 @@ async def query_jaeger_traces(
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", [])
+
+
+def spans_with_operation(
+    traces: list[dict[str, Any]], operation_name: str
+) -> list[dict[str, Any]]:
+    """Filter a list of Jaeger traces down to spans with a specific operation name.
+
+    Parameters:
+        traces: Traces as returned by query_jaeger_traces().
+        operation_name: Exact operation (span) name to keep, e.g. "step.execute".
+
+    Returns:
+        Flat list of matching span dicts, each still carrying its own tags.
+    """
+    return [
+        span
+        for trace in traces
+        for span in trace.get("spans", [])
+        if span.get("operationName") == operation_name
+    ]

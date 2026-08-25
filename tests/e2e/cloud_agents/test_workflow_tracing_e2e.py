@@ -32,7 +32,7 @@ Usage:
     uv run pytest tests/e2e/cloud_agents/test_workflow_tracing_e2e.py -v -s
 """
 
-# pylint: disable=import-outside-toplevel,too-few-public-methods,protected-access
+# pylint: disable=import-outside-toplevel,too-few-public-methods
 
 from __future__ import annotations
 
@@ -45,11 +45,12 @@ from typing import Any
 import pytest
 import yaml
 
-from tests.e2e.cloud_agents.conftest import (
+from tests.e2e.cloud_agents.jaeger_helpers import (
     OTLP_ENDPOINT,
     SERVICE_NAME,
     check_jaeger_available,
     query_jaeger_traces,
+    spans_with_operation,
 )
 
 pytestmark = [
@@ -179,28 +180,81 @@ async def run_state_store_fixture() -> AsyncIterator[Any]:
     await store.close()
 
 
+async def _poll_until_status(
+    runner: Any,
+    workflow_id: str,
+    target_statuses: set[str],
+    timeout: float = 60.0,
+) -> Any:
+    """Poll get_status() until the run reaches one of the target statuses.
+
+    Deliberately avoids reaching into LocalWorkflowRunner's private
+    `_running` task registry -- a real caller (e.g. the
+    GET /v1/workflows/{id} HTTP endpoint) only ever observes progress via
+    get_status(), never via an in-process task handle, so polling here
+    keeps the test representative of real usage.
+
+    Parameters:
+        runner: LocalWorkflowRunner instance.
+        workflow_id: Target run.
+        target_statuses: Statuses that end the poll loop.
+        timeout: Max seconds to wait before giving up.
+
+    Returns:
+        The WorkflowStatus once a target status is reached.
+
+    Raises:
+        AssertionError: If the timeout elapses before a target status.
+    """
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    while True:
+        status = await runner.get_status(workflow_id)
+        if status.status in target_statuses:
+            return status
+        if loop.time() >= deadline:
+            raise AssertionError(
+                f"Timed out after {timeout}s waiting for workflow "
+                f"{workflow_id} to reach one of {sorted(target_statuses)}; "
+                f"last status={status.status}"
+            )
+        await asyncio.sleep(0.5)
+
+
 async def _start_and_await_completion(runner: Any, definition: dict[str, Any]) -> str:
-    """Start a workflow run and block until its task finishes.
+    """Start a workflow run and poll until it reaches a terminal status.
 
     Parameters:
         runner: LocalWorkflowRunner instance.
         definition: Workflow definition dict.
 
     Returns:
-        The new run's workflow_id, once its task has completed.
+        The new run's workflow_id, once it has completed.
     """
     workflow_id = await runner.start({"definition": definition, "provider": _PROVIDER})
-
-    task = runner._running.get(workflow_id)
-    assert task is not None, "Expected an in-flight task for the new run"
-    await task
-
-    status = await runner.get_status(workflow_id)
+    status = await _poll_until_status(
+        runner, workflow_id, {"completed", "failed", "cancelled"}
+    )
     assert status.status == "completed", (
         f"Workflow did not complete cleanly: status={status.status}, "
         f"steps={status.steps}"
     )
     return workflow_id
+
+
+def _assert_workflow_id_tag(spans: list[dict[str, Any]], workflow_id: str) -> None:
+    """Assert every span in the list carries the expected workflow.id tag.
+
+    Parameters:
+        spans: Span dicts (e.g. from spans_with_operation()).
+        workflow_id: Expected value of the workflow.id tag.
+    """
+    for span in spans:
+        tags = {t["key"]: t["value"] for t in span.get("tags", [])}
+        assert tags.get("workflow.id") == workflow_id, (
+            f"Span {span.get('spanID')} ({span.get('operationName')}) has "
+            f"workflow.id={tags.get('workflow.id')!r}, expected {workflow_id!r}"
+        )
 
 
 class TestNoPauseWorkflowTracing:
@@ -238,15 +292,16 @@ class TestNoPauseWorkflowTracing:
             tags={"workflow.id": workflow_id},
         )
 
-        step_spans = [span for trace in traces for span in trace.get("spans", [])]
+        # `operation` only selects which *traces* match; a matched trace's
+        # `spans` list can still include other non-step.execute spans (e.g.
+        # from auto-instrumented libraries) that never carry workflow.id.
+        # Filter explicitly rather than assuming every returned span is ours.
+        step_spans = spans_with_operation(traces, "step.execute")
         assert len(step_spans) >= 2, (
             f"Expected >=2 step.execute spans tagged workflow.id={workflow_id} "
             f"in Jaeger, found {len(step_spans)}."
         )
-
-        for span in step_spans:
-            tags = {t["key"]: t["value"] for t in span.get("tags", [])}
-            assert tags.get("workflow.id") == workflow_id
+        _assert_workflow_id_tag(step_spans, workflow_id)
 
         trace_ids = {t["traceID"] for t in traces}
         assert len(trace_ids) == 1, (
@@ -256,27 +311,6 @@ class TestNoPauseWorkflowTracing:
             "execution is not preserving a single trace across steps for a "
             "live run -- see jameswnl/lightspeed-cloud-agents#179 item 3."
         )
-
-
-async def _await_running_task_with_status(
-    runner: Any, workflow_id: str, expected_status: str
-) -> None:
-    """Await the run's in-flight task, then assert its resulting status.
-
-    Parameters:
-        runner: LocalWorkflowRunner instance.
-        workflow_id: Target run.
-        expected_status: Status the run should have once its task finishes.
-    """
-    task = runner._running.get(workflow_id)
-    assert task is not None, f"Expected an in-flight task for {workflow_id}"
-    await task
-
-    status = await runner.get_status(workflow_id)
-    assert status.status == expected_status, (
-        f"Expected status={expected_status!r}, got status={status.status!r}, "
-        f"steps={status.steps}"
-    )
 
 
 async def _run_paused_then_resumed_workflow(
@@ -301,16 +335,25 @@ async def _run_paused_then_resumed_workflow(
     runner = LocalWorkflowRunner(run_state_store=run_state_store)
 
     workflow_id = await runner.start({"definition": definition, "provider": _PROVIDER})
-    await _await_running_task_with_status(runner, workflow_id, "paused")
+    status = await _poll_until_status(
+        runner, workflow_id, {"paused", "completed", "failed", "cancelled"}
+    )
+    assert status.status == "paused", (
+        f"Expected workflow to pause at the approval step, "
+        f"got status={status.status}"
+    )
 
     await asyncio.sleep(2)
     pre_pause_traces = await query_jaeger_traces(
         operation="step.execute",
         tags={"workflow.id": workflow_id},
     )
-    assert (
-        pre_pause_traces
-    ), f"Expected at least one pre-pause trace tagged workflow.id={workflow_id}"
+    pre_pause_step_spans = spans_with_operation(pre_pause_traces, "step.execute")
+    assert pre_pause_step_spans, (
+        f"Expected at least one step.execute span tagged "
+        f"workflow.id={workflow_id} before pause"
+    )
+    _assert_workflow_id_tag(pre_pause_step_spans, workflow_id)
     pre_pause_trace_ids = {t["traceID"] for t in pre_pause_traces}
 
     await runner.approve(
@@ -321,12 +364,21 @@ async def _run_paused_then_resumed_workflow(
             approver="e2e-test",
         ),
     )
-    await _await_running_task_with_status(runner, workflow_id, "completed")
+    status = await _poll_until_status(
+        runner, workflow_id, {"completed", "failed", "cancelled"}
+    )
+    assert status.status == "completed", (
+        f"Workflow did not complete after resume: "
+        f"status={status.status}, steps={status.steps}"
+    )
 
     await asyncio.sleep(2)
     all_traces = await query_jaeger_traces(
         operation="step.execute",
         tags={"workflow.id": workflow_id},
+    )
+    _assert_workflow_id_tag(
+        spans_with_operation(all_traces, "step.execute"), workflow_id
     )
     all_trace_ids = {t["traceID"] for t in all_traces}
     post_resume_trace_ids = all_trace_ids - pre_pause_trace_ids
@@ -357,9 +409,10 @@ class TestPauseResumeWorkflowTracing:
         traces today, since nothing persists/restores OTEL context across
         the pause (see cloud-agents#179 item 2) -- the correlation
         mechanism that reliably works today is the shared workflow.id tag,
-        asserted for real below. Whether a post-resume span additionally
-        carries an OTEL span Link back to the pre-pause trace is the part
-        still blocked on cloud-agents#179 item 2 landing.
+        asserted for real below (including at the individual-span level,
+        not just via the Jaeger tag-query filter). Whether a post-resume
+        span additionally carries an OTEL span Link back to the pre-pause
+        trace is the part still blocked on cloud-agents#179 item 2 landing.
         """
         _ = tracer
         if not await check_jaeger_available():
@@ -380,12 +433,10 @@ class TestPauseResumeWorkflowTracing:
             operation="step.execute",
             tags={"workflow.id": workflow_id},
         )
-        post_resume_spans = [
-            span
-            for trace in post_resume_traces
-            if trace["traceID"] in post_resume_trace_ids
-            for span in trace.get("spans", [])
-        ]
+        post_resume_spans = spans_with_operation(
+            [t for t in post_resume_traces if t["traceID"] in post_resume_trace_ids],
+            "step.execute",
+        )
         linked_trace_ids = {
             ref.get("traceID")
             for span in post_resume_spans
@@ -397,5 +448,7 @@ class TestPauseResumeWorkflowTracing:
                 "blocked on cloud-agents#179 item 2 (trace continuity across "
                 "resume) -- LocalWorkflowRunner does not yet persist/replay "
                 "a traceparent across pause/resume, so the resumed run's "
-                "spans carry no link back to the pre-pause trace"
+                "spans carry no link back to the pre-pause trace. Observed "
+                f"reference trace_ids: {sorted(filter(None, linked_trace_ids))}, "
+                f"pre-pause trace_ids: {sorted(pre_pause_trace_ids)}."
             )

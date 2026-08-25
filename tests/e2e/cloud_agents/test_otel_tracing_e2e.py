@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from tests.e2e.cloud_agents.conftest import (
+from tests.e2e.cloud_agents.jaeger_helpers import (
     OTLP_ENDPOINT,
     SERVICE_NAME,
     check_jaeger_available,

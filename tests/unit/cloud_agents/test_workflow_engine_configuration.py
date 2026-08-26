@@ -168,6 +168,29 @@ def test_spawner_configuration_rejects_unknown_field() -> None:
         )
 
 
+def test_spawner_configuration_rejects_leftover_kubernetes_fields() -> None:
+    """namespace/service_account (kubernetes-spawner-only) are gone.
+
+    Old kubernetes-type YAML that still sets these is rejected outright by
+    extra="forbid" rather than silently accepted and ignored.
+    """
+    with pytest.raises(ValidationError):
+        SpawnerConfiguration(
+            type="openshell",
+            openshell_gateway_url="localhost:9080",
+            openshell_driver="kubernetes",
+            namespace="agents",  # type: ignore[call-arg]
+        )
+
+    with pytest.raises(ValidationError):
+        SpawnerConfiguration(
+            type="openshell",
+            openshell_gateway_url="localhost:9080",
+            openshell_driver="kubernetes",
+            service_account="agent-sa",  # type: ignore[call-arg]
+        )
+
+
 def _make_config(**overrides: Any) -> Configuration:
     """Create a minimal Configuration with optional overrides."""
     defaults = {

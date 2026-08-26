@@ -122,14 +122,16 @@ sequenceDiagram
     participant Client
     participant FastAPI
     participant SandboxExec as SandboxExecutor
-    participant Spawner as AgentSpawner
+    participant Spawner as OpenShellSpawner
+    participant Gateway as OpenShell Gateway
     participant Container as Sandbox Container
     participant LLM as OpenAI API
 
     Client->>FastAPI: POST /agents/run
     FastAPI->>SandboxExec: run(StepInput)
     SandboxExec->>Spawner: spawn(image, env, labels)
-    Spawner->>Container: create K8s Job / Podman container
+    Spawner->>Gateway: CreateSandbox (kubernetes or podman driver)
+    Gateway->>Container: create sandbox
     SandboxExec->>Container: wait_ready(/health)
     SandboxExec->>Container: POST /v1/agent/run
     Note over Container: Any SDK inside<br/>(Claude Code, OpenAI Agents,<br/>pydantic-ai, etc.)

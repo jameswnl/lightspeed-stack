@@ -52,6 +52,7 @@ pytestmark = [
 
 _AUTH: AuthTuple = ("e2e-user", "e2e-tester", False, "")
 _OPENSHELL_GATEWAY_URL = os.environ.get("OPENSHELL_GATEWAY_URL", "localhost:17670")
+_OPENSHELL_DRIVER = os.environ.get("OPENSHELL_DRIVER", "podman")
 _SANDBOX_IMAGE = os.environ.get(
     "LIGHTSPEED_SANDBOX_IMAGE", "quay.io/jameswong/lightspeed-agentic-sandbox:latest"
 )
@@ -73,6 +74,7 @@ _CONFIG = {
     "spawner": {
         "type": "openshell",
         "openshell_gateway_url": _OPENSHELL_GATEWAY_URL,
+        "openshell_driver": _OPENSHELL_DRIVER,
         "sandbox_image": _SANDBOX_IMAGE,
     },
 }

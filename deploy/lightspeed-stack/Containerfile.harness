@@ -35,6 +35,9 @@ USER root
 COPY --from=cloud_agents src /opt/lightspeed-cloud-agents/src
 COPY --from=cloud_agents pyproject.toml README.md LICENSE /opt/lightspeed-cloud-agents/
 
+# alembic.ini/alembic/ now live under src/cloud_agents/_alembic/ (packaged
+# with the wheel as of lightspeed-cloud-agents#188/PR #190), so the plain
+# COPY + pip install above is sufficient -- no separate copy step needed.
 RUN /app-root/.venv/bin/python3.12 -m ensurepip && \
     /app-root/.venv/bin/python3.12 -m pip install --no-cache-dir \
     "/opt/lightspeed-cloud-agents[local,kubernetes,openshell]" && \

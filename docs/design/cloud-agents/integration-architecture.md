@@ -130,17 +130,26 @@ sequenceDiagram
     Client->>FastAPI: POST /agents/run
     FastAPI->>SandboxExec: run(StepInput)
     SandboxExec->>Spawner: spawn(image, env, labels)
-    Spawner->>Gateway: CreateSandbox (kubernetes or podman driver)
+    Spawner->>Gateway: CreateSandbox
+    Note over Gateway: Gateway's own compute driver<br/>(kubernetes or podman) decides<br/>how the sandbox is created --<br/>not something the client sends
     Gateway->>Container: create sandbox
-    SandboxExec->>Container: wait_ready(/health)
-    SandboxExec->>Container: POST /v1/agent/run
+    Spawner->>Gateway: ExposeService
+    Note over Gateway,Container: All further HTTP calls are<br/>proxied through the gateway's own<br/>address (Host-header routed) --<br/>never a direct pod/container IP
+    SandboxExec->>Gateway: wait_ready(/health)
+    Gateway->>Container: /health
+    SandboxExec->>Gateway: POST /v1/agent/run
+    Gateway->>Container: POST /v1/agent/run
     Note over Container: Any SDK inside<br/>(Claude Code, OpenAI Agents,<br/>pydantic-ai, etc.)
     Container->>LLM: inference call
     LLM-->>Container: response
-    Container-->>SandboxExec: JSON result
-    SandboxExec->>Container: GET /v1/agent/events
-    Container-->>SandboxExec: transcript
-    SandboxExec->>Spawner: destroy(pod_name)
+    Container-->>Gateway: JSON result
+    Gateway-->>SandboxExec: JSON result
+    SandboxExec->>Gateway: GET /v1/agent/events
+    Gateway->>Container: GET /v1/agent/events
+    Container-->>Gateway: transcript
+    Gateway-->>SandboxExec: transcript
+    SandboxExec->>Spawner: destroy(sandbox_name)
+    Spawner->>Gateway: DeleteSandbox
     SandboxExec-->>FastAPI: StepResult
     FastAPI-->>Client: JSON response
 ```

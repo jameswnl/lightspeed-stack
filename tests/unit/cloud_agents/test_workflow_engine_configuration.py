@@ -61,31 +61,23 @@ def test_workflow_engine_rejects_unknown_field() -> None:
         WorkflowEngineConfiguration(unknown_field=True)  # type: ignore[call-arg]
 
 
-def test_spawner_configuration_kubernetes() -> None:
-    """SpawnerConfiguration accepts kubernetes type."""
-    config = SpawnerConfiguration(
-        type="kubernetes",
-        namespace="agents",
-        service_account="agent-sa",
-    )
-    assert config.type == "kubernetes"
-    assert config.sandbox_image == "lightspeed-agentic-sandbox:latest"
-    assert config.max_pods == 10
-    assert config.namespace == "agents"
-    assert config.service_account == "agent-sa"
+def test_spawner_configuration_rejects_kubernetes_type() -> None:
+    """spawn:ephemeral uses OpenShellSpawner only -- kubernetes is no longer a valid type."""
+    with pytest.raises(ValidationError):
+        SpawnerConfiguration(type="kubernetes")  # type: ignore[arg-type]
 
 
-def test_spawner_configuration_podman() -> None:
-    """SpawnerConfiguration accepts podman type."""
-    config = SpawnerConfiguration(type="podman")
-    assert config.type == "podman"
-    assert config.namespace is None
+def test_spawner_configuration_rejects_podman_type() -> None:
+    """spawn:ephemeral uses OpenShellSpawner only -- podman is no longer a valid type."""
+    with pytest.raises(ValidationError):
+        SpawnerConfiguration(type="podman")  # type: ignore[arg-type]
 
 
 def test_spawner_configuration_custom_image() -> None:
     """SpawnerConfiguration accepts custom sandbox image."""
     config = SpawnerConfiguration(
-        type="kubernetes",
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
         sandbox_image="my-sandbox:v2",
         max_pods=20,
     )
@@ -94,13 +86,13 @@ def test_spawner_configuration_custom_image() -> None:
 
 
 def test_spawner_configuration_openshell_defaults() -> None:
-    """SpawnerConfiguration accepts openshell type with default fields."""
+    """SpawnerConfiguration fills in sensible defaults besides type/gateway."""
     config = SpawnerConfiguration(
-        type="openshell", openshell_gateway_url="localhost:9080"
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
     )
     assert config.type == "openshell"
     assert config.openshell_gateway_url == "localhost:9080"
-    assert config.openshell_driver == "podman"
     assert config.openshell_workspace == "default"
     assert config.openshell_tls_ca is None
     assert config.openshell_tls_cert is None
@@ -113,12 +105,10 @@ def test_spawner_configuration_openshell_custom_values() -> None:
     config = SpawnerConfiguration(
         type="openshell",
         openshell_gateway_url="localhost:9080",
-        openshell_driver="podman",
         openshell_workspace="lcore",
         openshell_bearer_token="secret-token",
     )
     assert config.openshell_gateway_url == "localhost:9080"
-    assert config.openshell_driver == "podman"
     assert config.openshell_workspace == "lcore"
     assert (
         config.openshell_bearer_token is not None
@@ -132,6 +122,23 @@ def test_spawner_configuration_openshell_requires_gateway_url() -> None:
         SpawnerConfiguration(type="openshell")
 
 
+def test_spawner_configuration_rejects_driver_field() -> None:
+    """openshell_driver is not a client-side concern -- no such field exists.
+
+    OpenShellSpawner's whole lifecycle (create/exec/expose/query/destroy) is
+    proxied through the gateway's own network address, so lightspeed-stack
+    never needs to know which compute driver the gateway itself uses. Old
+    YAML setting this is rejected outright by extra="forbid", not silently
+    accepted and ignored.
+    """
+    with pytest.raises(ValidationError):
+        SpawnerConfiguration(
+            type="openshell",
+            openshell_gateway_url="localhost:9080",
+            openshell_driver="kubernetes",  # type: ignore[call-arg]
+        )
+
+
 def test_spawner_configuration_rejects_unknown_type() -> None:
     """SpawnerConfiguration rejects invalid type values."""
     with pytest.raises(ValidationError):
@@ -141,13 +148,42 @@ def test_spawner_configuration_rejects_unknown_type() -> None:
 def test_spawner_configuration_rejects_non_positive_max_pods() -> None:
     """max_pods rejects zero and negative values."""
     with pytest.raises(ValidationError):
-        SpawnerConfiguration(type="kubernetes", max_pods=0)
+        SpawnerConfiguration(
+            type="openshell",
+            openshell_gateway_url="localhost:9080",
+            max_pods=0,
+        )
 
 
 def test_spawner_configuration_rejects_unknown_field() -> None:
     """Unknown fields are forbidden."""
     with pytest.raises(ValidationError):
-        SpawnerConfiguration(type="kubernetes", unknown=True)  # type: ignore[call-arg]
+        SpawnerConfiguration(
+            type="openshell",
+            openshell_gateway_url="localhost:9080",
+            unknown=True,  # type: ignore[call-arg]
+        )
+
+
+def test_spawner_configuration_rejects_leftover_kubernetes_fields() -> None:
+    """namespace/service_account (kubernetes-spawner-only) are gone.
+
+    Old kubernetes-type YAML that still sets these is rejected outright by
+    extra="forbid" rather than silently accepted and ignored.
+    """
+    with pytest.raises(ValidationError):
+        SpawnerConfiguration(
+            type="openshell",
+            openshell_gateway_url="localhost:9080",
+            namespace="agents",  # type: ignore[call-arg]
+        )
+
+    with pytest.raises(ValidationError):
+        SpawnerConfiguration(
+            type="openshell",
+            openshell_gateway_url="localhost:9080",
+            service_account="agent-sa",  # type: ignore[call-arg]
+        )
 
 
 def _make_config(**overrides: Any) -> Configuration:

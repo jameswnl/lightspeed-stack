@@ -78,7 +78,6 @@ def test_spawner_configuration_custom_image() -> None:
     config = SpawnerConfiguration(
         type="openshell",
         openshell_gateway_url="localhost:9080",
-        openshell_driver="kubernetes",
         sandbox_image="my-sandbox:v2",
         max_pods=20,
     )
@@ -87,15 +86,13 @@ def test_spawner_configuration_custom_image() -> None:
 
 
 def test_spawner_configuration_openshell_defaults() -> None:
-    """SpawnerConfiguration fills in sensible defaults besides type/gateway/driver."""
+    """SpawnerConfiguration fills in sensible defaults besides type/gateway."""
     config = SpawnerConfiguration(
         type="openshell",
         openshell_gateway_url="localhost:9080",
-        openshell_driver="kubernetes",
     )
     assert config.type == "openshell"
     assert config.openshell_gateway_url == "localhost:9080"
-    assert config.openshell_driver == "kubernetes"
     assert config.openshell_workspace == "default"
     assert config.openshell_tls_ca is None
     assert config.openshell_tls_cert is None
@@ -108,12 +105,10 @@ def test_spawner_configuration_openshell_custom_values() -> None:
     config = SpawnerConfiguration(
         type="openshell",
         openshell_gateway_url="localhost:9080",
-        openshell_driver="podman",
         openshell_workspace="lcore",
         openshell_bearer_token="secret-token",
     )
     assert config.openshell_gateway_url == "localhost:9080"
-    assert config.openshell_driver == "podman"
     assert config.openshell_workspace == "lcore"
     assert (
         config.openshell_bearer_token is not None
@@ -124,19 +119,23 @@ def test_spawner_configuration_openshell_custom_values() -> None:
 def test_spawner_configuration_openshell_requires_gateway_url() -> None:
     """openshell type without openshell_gateway_url is rejected."""
     with pytest.raises(ValidationError, match="openshell_gateway_url"):
-        SpawnerConfiguration(type="openshell", openshell_driver="kubernetes")
+        SpawnerConfiguration(type="openshell")
 
 
-def test_spawner_configuration_requires_driver() -> None:
-    """openshell_driver has no silent default -- it must be set explicitly.
+def test_spawner_configuration_rejects_driver_field() -> None:
+    """openshell_driver is not a client-side concern -- no such field exists.
 
-    A silent default (the old behavior) lets an operator deploy on the wrong
-    substrate (e.g. K8s/OCP/Kind without setting driver=kubernetes) and get a
-    mismatched, wrong compute driver with no warning.
+    OpenShellSpawner's whole lifecycle (create/exec/expose/query/destroy) is
+    proxied through the gateway's own network address, so lightspeed-stack
+    never needs to know which compute driver the gateway itself uses. Old
+    YAML setting this is rejected outright by extra="forbid", not silently
+    accepted and ignored.
     """
-    with pytest.raises(ValidationError, match="openshell_driver"):
-        SpawnerConfiguration(  # type: ignore[call-arg]
-            type="openshell", openshell_gateway_url="localhost:9080"
+    with pytest.raises(ValidationError):
+        SpawnerConfiguration(
+            type="openshell",
+            openshell_gateway_url="localhost:9080",
+            openshell_driver="kubernetes",  # type: ignore[call-arg]
         )
 
 
@@ -152,7 +151,6 @@ def test_spawner_configuration_rejects_non_positive_max_pods() -> None:
         SpawnerConfiguration(
             type="openshell",
             openshell_gateway_url="localhost:9080",
-            openshell_driver="kubernetes",
             max_pods=0,
         )
 
@@ -163,7 +161,6 @@ def test_spawner_configuration_rejects_unknown_field() -> None:
         SpawnerConfiguration(
             type="openshell",
             openshell_gateway_url="localhost:9080",
-            openshell_driver="kubernetes",
             unknown=True,  # type: ignore[call-arg]
         )
 
@@ -178,7 +175,6 @@ def test_spawner_configuration_rejects_leftover_kubernetes_fields() -> None:
         SpawnerConfiguration(
             type="openshell",
             openshell_gateway_url="localhost:9080",
-            openshell_driver="kubernetes",
             namespace="agents",  # type: ignore[call-arg]
         )
 
@@ -186,7 +182,6 @@ def test_spawner_configuration_rejects_leftover_kubernetes_fields() -> None:
         SpawnerConfiguration(
             type="openshell",
             openshell_gateway_url="localhost:9080",
-            openshell_driver="kubernetes",
             service_account="agent-sa",  # type: ignore[call-arg]
         )
 

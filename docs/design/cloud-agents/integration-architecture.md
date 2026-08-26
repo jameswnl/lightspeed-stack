@@ -281,7 +281,6 @@ spawner:
   sandbox_image: lightspeed-agentic-sandbox:latest
   max_pods: 10
   openshell_gateway_url: openshell-gateway:8080
-  openshell_driver: kubernetes   # kubernetes | podman -- must match your deployment target
 
 mcp_servers:
   - name: kubectl

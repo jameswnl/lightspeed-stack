@@ -41,7 +41,6 @@ def build_spawner(spawner_config: SpawnerConfiguration) -> Any:
     _spawner = _cloud_agents_build_spawner(
         "openshell",
         gateway_url=spawner_config.openshell_gateway_url,
-        driver=spawner_config.openshell_driver,
         workspace=spawner_config.openshell_workspace,
         http_endpoint=spawner_config.openshell_http_endpoint or "",
         tls_ca=(

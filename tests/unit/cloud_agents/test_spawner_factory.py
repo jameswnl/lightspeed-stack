@@ -37,12 +37,16 @@ def _patch_cloud_agents_build_spawner(mocker: MockerFixture) -> Any:
 
 
 def test_build_spawner_openshell_full_config(mocker: MockerFixture) -> None:
-    """openshell type forwards gateway/driver/workspace/TLS/bearer token."""
+    """openshell type forwards gateway/workspace/TLS/bearer token, not driver.
+
+    No `driver` kwarg is forwarded -- the compute driver the gateway itself
+    uses is the gateway's own concern, not something lightspeed-stack
+    configures or passes through.
+    """
     mock = _patch_cloud_agents_build_spawner(mocker)
     config = SpawnerConfiguration(
         type="openshell",
         openshell_gateway_url="localhost:9080",
-        openshell_driver="podman",
         openshell_workspace="lcore",
         openshell_http_endpoint="https://sandboxes.example.com",
         openshell_bearer_token="secret-token",
@@ -53,7 +57,6 @@ def test_build_spawner_openshell_full_config(mocker: MockerFixture) -> None:
     mock.assert_called_once_with(
         "openshell",
         gateway_url="localhost:9080",
-        driver="podman",
         workspace="lcore",
         http_endpoint="https://sandboxes.example.com",
         tls_ca="",
@@ -70,7 +73,6 @@ def test_build_spawner_openshell_defaults(mocker: MockerFixture) -> None:
     config = SpawnerConfiguration(
         type="openshell",
         openshell_gateway_url="localhost:9080",
-        openshell_driver="kubernetes",
     )
 
     build_spawner(config)
@@ -78,7 +80,6 @@ def test_build_spawner_openshell_defaults(mocker: MockerFixture) -> None:
     mock.assert_called_once_with(
         "openshell",
         gateway_url="localhost:9080",
-        driver="kubernetes",
         workspace="default",
         http_endpoint="",
         tls_ca="",
@@ -95,7 +96,6 @@ def test_build_spawner_caches_singleton(mocker: MockerFixture) -> None:
     config = SpawnerConfiguration(
         type="openshell",
         openshell_gateway_url="localhost:9080",
-        openshell_driver="podman",
     )
 
     first = build_spawner(config)
@@ -111,7 +111,6 @@ def test_reset_spawner_forces_rebuild(mocker: MockerFixture) -> None:
     config = SpawnerConfiguration(
         type="openshell",
         openshell_gateway_url="localhost:9080",
-        openshell_driver="podman",
     )
 
     build_spawner(config)

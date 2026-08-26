@@ -3152,20 +3152,18 @@ class SpawnerConfiguration(ConfigurationBase):
     """Ephemeral agent spawner configuration.
 
     spawn: "ephemeral" uses OpenShellSpawner exclusively -- no other spawner
-    backend is supported, so `type` only accepts "openshell". OpenShellSpawner
-    itself supports exactly two compute driver configurations, each tied to a
-    fixed deployment target: "kubernetes" when lightspeed-stack itself is
-    deployed on Kubernetes/OpenShift/Kind, "podman" when deployed via Podman.
-    `openshell_driver` has no default, forcing an explicit, correct choice
-    rather than silently assuming the wrong substrate.
+    backend is supported, so `type` only accepts "openshell". The compute
+    driver the OpenShell gateway itself uses to spawn sandboxes (kubernetes
+    vs. podman) is entirely the gateway's own concern -- OpenShellSpawner's
+    whole lifecycle (create/exec/expose/query/destroy) is proxied through the
+    gateway's own network address, so lightspeed-stack never needs to know or
+    configure it. There is deliberately no `driver`-style field here.
 
     Attributes:
         type: Spawner backend type (openshell only).
         sandbox_image: Default container image for sandbox pods.
         max_pods: Maximum concurrent sandbox pods.
         openshell_gateway_url: OpenShell gateway gRPC endpoint.
-        openshell_driver: Compute driver the OpenShell gateway itself uses --
-            must match the actual deployment substrate.
         openshell_workspace: OpenShell workspace name.
         openshell_http_endpoint: Override HTTP proxy endpoint, when split
             from the gRPC endpoint.
@@ -3198,16 +3196,6 @@ class SpawnerConfiguration(ConfigurationBase):
         ...,
         title="OpenShell gateway URL",
         description="OpenShell gateway gRPC endpoint, e.g. 'localhost:9080'.",
-    )
-
-    openshell_driver: Literal["kubernetes", "podman"] = Field(
-        ...,
-        title="OpenShell compute driver",
-        description="Compute driver the OpenShell gateway itself uses to spawn "
-        "sandboxes. Must match the actual deployment substrate: 'kubernetes' "
-        "when lightspeed-stack is deployed on Kubernetes/OpenShift/Kind, "
-        "'podman' when deployed via Podman. No default -- must be set "
-        "explicitly.",
     )
 
     openshell_workspace: str = Field(

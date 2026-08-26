@@ -36,46 +36,6 @@ def _patch_cloud_agents_build_spawner(mocker: MockerFixture) -> Any:
     return mock
 
 
-def test_build_spawner_kubernetes(mocker: MockerFixture) -> None:
-    """kubernetes type forwards namespace/service_account/max_pods."""
-    mock = _patch_cloud_agents_build_spawner(mocker)
-    config = SpawnerConfiguration(
-        type="kubernetes", namespace="agents", service_account="agent-sa"
-    )
-
-    result = build_spawner(config)
-
-    mock.assert_called_once_with(
-        "kubernetes",
-        max_pods=10,
-        namespace="agents",
-        service_account="agent-sa",
-    )
-    assert result is mock.return_value
-
-
-def test_build_spawner_kubernetes_omits_unset_optional_fields(
-    mocker: MockerFixture,
-) -> None:
-    """kubernetes type omits namespace/service_account when unset, not None."""
-    mock = _patch_cloud_agents_build_spawner(mocker)
-    config = SpawnerConfiguration(type="kubernetes")
-
-    build_spawner(config)
-
-    mock.assert_called_once_with("kubernetes", max_pods=10)
-
-
-def test_build_spawner_podman(mocker: MockerFixture) -> None:
-    """podman type forwards only max_pods (no namespace/service_account)."""
-    mock = _patch_cloud_agents_build_spawner(mocker)
-    config = SpawnerConfiguration(type="podman", max_pods=5)
-
-    build_spawner(config)
-
-    mock.assert_called_once_with("podman", max_pods=5)
-
-
 def test_build_spawner_openshell_full_config(mocker: MockerFixture) -> None:
     """openshell type forwards gateway/driver/workspace/TLS/bearer token."""
     mock = _patch_cloud_agents_build_spawner(mocker)
@@ -108,7 +68,9 @@ def test_build_spawner_openshell_defaults(mocker: MockerFixture) -> None:
     """openshell type with no TLS/bearer config still calls through."""
     mock = _patch_cloud_agents_build_spawner(mocker)
     config = SpawnerConfiguration(
-        type="openshell", openshell_gateway_url="localhost:9080"
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
+        openshell_driver="kubernetes",
     )
 
     build_spawner(config)
@@ -116,7 +78,7 @@ def test_build_spawner_openshell_defaults(mocker: MockerFixture) -> None:
     mock.assert_called_once_with(
         "openshell",
         gateway_url="localhost:9080",
-        driver="podman",
+        driver="kubernetes",
         workspace="default",
         http_endpoint="",
         tls_ca="",
@@ -130,7 +92,11 @@ def test_build_spawner_openshell_defaults(mocker: MockerFixture) -> None:
 def test_build_spawner_caches_singleton(mocker: MockerFixture) -> None:
     """Second call returns the cached spawner without rebuilding."""
     mock = _patch_cloud_agents_build_spawner(mocker)
-    config = SpawnerConfiguration(type="podman")
+    config = SpawnerConfiguration(
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
+        openshell_driver="podman",
+    )
 
     first = build_spawner(config)
     second = build_spawner(config)
@@ -142,7 +108,11 @@ def test_build_spawner_caches_singleton(mocker: MockerFixture) -> None:
 def test_reset_spawner_forces_rebuild(mocker: MockerFixture) -> None:
     """reset_spawner() clears the cache so the next call rebuilds."""
     mock = _patch_cloud_agents_build_spawner(mocker)
-    config = SpawnerConfiguration(type="podman")
+    config = SpawnerConfiguration(
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
+        openshell_driver="podman",
+    )
 
     build_spawner(config)
     reset_spawner()

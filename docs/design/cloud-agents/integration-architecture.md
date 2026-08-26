@@ -275,10 +275,11 @@ workflow_engine:
   transcript_retention_days: 30
 
 spawner:
-  type: kubernetes          # kubernetes | podman
+  type: openshell
   sandbox_image: lightspeed-agentic-sandbox:latest
   max_pods: 10
-  namespace: agents
+  openshell_gateway_url: openshell-gateway:8080
+  openshell_driver: kubernetes   # kubernetes | podman -- must match your deployment target
 
 mcp_servers:
   - name: kubectl

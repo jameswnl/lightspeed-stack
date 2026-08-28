@@ -17,7 +17,7 @@ Usage:
     uv run pytest tests/e2e/cloud_agents/test_agents_workflow_http_e2e.py -v
 """
 
-# pylint: disable=too-few-public-methods
+# pylint: disable=too-few-public-methods,import-outside-toplevel
 
 from __future__ import annotations
 
@@ -71,8 +71,16 @@ def http_client_fixture() -> Generator[TestClient, None, None]:
     original = os.environ.get("LIGHTSPEED_STACK_CONFIG_PATH")
     os.environ["LIGHTSPEED_STACK_CONFIG_PATH"] = str(_HARNESS_CONFIG)
     try:
-        import app.endpoints.workflows as wf_mod  # pylint: disable=import-outside-toplevel
-        from app.main import app  # pylint: disable=import-outside-toplevel
+        from configuration import configuration as config_module
+
+        # app.main reads configuration.configuration.name and
+        # configuration.service_configuration.root_path at import time to
+        # construct the FastAPI app -- LIGHTSPEED_STACK_CONFIG_PATH alone
+        # isn't enough, config must actually be loaded before the import.
+        config_module.load_configuration(str(_HARNESS_CONFIG))
+
+        import app.endpoints.workflows as wf_mod
+        from app.main import app
 
         wf_mod._executor = None  # pylint: disable=protected-access
         with TestClient(app) as client:
@@ -231,4 +239,6 @@ class TestWorkflowHttpE2E:
             f"/v1/workflows/{workflow_id}/transcripts"
         )
         assert transcripts_response.status_code == 200
-        assert transcripts_response.json()["transcripts"]
+        transcripts = transcripts_response.json()["transcripts"]
+        assert "triage_result" in transcripts
+        assert "remediate_result" in transcripts

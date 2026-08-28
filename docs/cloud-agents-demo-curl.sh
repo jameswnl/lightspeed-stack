@@ -65,11 +65,32 @@ tab2_openshell_agent() {
     }' | jq
 }
 
+wait_for_status() {
+  # Poll GET /v1/workflows/$1 until .status is one of $2 (space-separated),
+  # up to 30s. Prints the final response and exits non-zero on timeout --
+  # POST /v1/workflows/run returns 202 as soon as the workflow task is
+  # created, before triage or pause; approving/checking immediately after
+  # races the async execution.
+  local wf_id="$1" wanted="$2" status="" resp=""
+  for _ in $(seq 1 30); do
+    resp=$(curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id")
+    status=$(echo "$resp" | jq -r .status)
+    if [[ " $wanted " == *" $status "* ]]; then
+      echo "$resp" | jq
+      return 0
+    fi
+    sleep 1
+  done
+  echo "ERROR: workflow '$wf_id' never reached status in [$wanted] (last: $status)" >&2
+  echo "$resp" | jq
+  return 1
+}
+
 tab3_workflow() {
   echo "== Tab 3: Workflow — OpenShell (POST /v1/workflows/run) =="
   local resp wf_id
 
-  resp=$(curl -s -X POST "$BASE_URL/v1/workflows/run" \
+  resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
     "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
     -H "Content-Type: application/json" \
     -d '{
@@ -110,26 +131,30 @@ tab3_workflow() {
     }')
   echo "$resp" | jq
   wf_id=$(echo "$resp" | jq -r .workflow_id)
+  if [[ -z "$wf_id" || "$wf_id" == "null" ]]; then
+    echo "ERROR: no workflow_id in response" >&2
+    exit 1
+  fi
   echo "workflow_id=$wf_id"
 
   echo
-  echo "-- Status (should show paused at 'approve') --"
-  curl -s "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id" | jq
+  echo "-- Waiting for status 'paused' at 'approve' --"
+  wait_for_status "$wf_id" "paused"
 
   echo
   echo "-- Approving 'approve' step --"
-  curl -s -X POST "$BASE_URL/v1/workflows/$wf_id/approve" \
+  curl -sf -X POST "$BASE_URL/v1/workflows/$wf_id/approve" \
     "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
     -H "Content-Type: application/json" \
     -d '{"step_name": "approve", "decision": "approved", "approver": "demo-user"}' | jq
 
   echo
-  echo "-- Status (should show completed) --"
-  curl -s "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id" | jq
+  echo "-- Waiting for a terminal status --"
+  wait_for_status "$wf_id" "completed failed cancelled"
 
   echo
   echo "-- Per-step transcripts --"
-  curl -s "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id/transcripts" | jq
+  curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id/transcripts" | jq
 }
 
 case "${1:-}" in

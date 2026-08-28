@@ -181,12 +181,16 @@ test-e2e-agents-workflows: ## Real-HTTP e2e tests for /v1/agents/run and /v1/wor
 		echo "ERROR: No container runtime found. Install podman or docker."; \
 		exit 1; \
 	fi
+	@if ! $(CONTAINER_RUNTIME) compose version >/dev/null 2>&1; then \
+		echo "ERROR: '$(CONTAINER_RUNTIME) compose' is not available. Install the compose plugin."; \
+		exit 1; \
+	fi
 	@echo "Ensuring Postgres is up (needed for workflow run-state/transcript storage)..."
-	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d postgres
+	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d --wait postgres
 	uv run pytest tests/e2e/cloud_agents/test_agents_workflow_http_e2e.py -v
 
 demo-agents-workflows: ## Curl-based live demo against a running server (make demo-agents-workflows TAB=tab1|tab2|tab3|discover)
-	@if ! curl -s -o /dev/null -w '' --max-time 2 "$${BASE_URL:-http://localhost:8090}/v1/info" 2>/dev/null; then \
+	@if ! curl -s -o /dev/null --max-time 2 "$${BASE_URL:-http://localhost:8090}/v1/info" 2>/dev/null; then \
 		echo "ERROR: no server reachable at $${BASE_URL:-http://localhost:8090}."; \
 		echo "Start one with: uv run make run-stack CONFIG=lightspeed-stack-harness.yaml"; \
 		exit 1; \

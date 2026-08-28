@@ -1,16 +1,25 @@
 """Real HTTP e2e tests for /v1/agents/run and /v1/workflows/*.
 
 Companion automated coverage for docs/cloud-agents-demo-curl.sh -- exercises
-the same flows (in-process agent run, workflow run/approve/transcripts)
-through the actual FastAPI app over real HTTP (real routing, real auth
-dependency resolution, real request/response validation), instead of
-calling endpoint handler functions directly like the other cloud_agents
-unit/integration/e2e suites do.
+the same flows (in-process agent run, workflow run/approve/transcripts,
+ephemeral/local spawn steps) through the actual FastAPI app over real HTTP
+(real routing, real auth dependency resolution, real request/response
+validation), instead of calling endpoint handler functions directly like
+the other cloud_agents unit/integration/e2e suites do.
 
-Requires OPENAI_API_KEY (real LLM calls, no mocking) and a reachable
-PostgreSQL matching lightspeed-stack-harness.yaml's database.postgres
-section (used for workflow run-state/transcript storage). Skips cleanly if
-either prerequisite is missing.
+Requires OPENAI_API_KEY and a reachable PostgreSQL matching
+lightspeed-stack-harness.yaml's database.postgres section (used for
+workflow run-state/transcript storage). Skips cleanly if either
+prerequisite is missing. spawn=ephemeral tests additionally require a
+reachable OpenShell gateway (OPENSHELL_GATEWAY_URL, default
+localhost:17670) and are marked `ephemeral` so CI can deselect them with
+`-m "not ephemeral"`.
+
+Set LIGHTSPEED_E2E_USE_MOCK_LLM=1 (see conftest.py) to run the
+none/local-spawn tests here against an in-process mock LLM instead of
+real OpenAI -- this is what CI does, so it doesn't need a real
+OPENAI_API_KEY or network egress. Ephemeral tests still need a real key
+and gateway either way.
 
 Usage:
     cd ~/ws/local-infra && make up   # provides Postgres on localhost:5432
@@ -24,8 +33,9 @@ from __future__ import annotations
 import os
 import socket
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -55,6 +65,40 @@ pytestmark = [
         reason="PostgreSQL not reachable on localhost:5432 (needed for workflow storage)",
     ),
 ]
+
+_OPENSHELL_GATEWAY_URL = os.environ.get("OPENSHELL_GATEWAY_URL", "localhost:17670")
+_SANDBOX_IMAGE = os.environ.get(
+    "LIGHTSPEED_SANDBOX_IMAGE", "quay.io/jameswong/lightspeed-agentic-sandbox:latest"
+)
+
+
+def _skip_if_gateway_unreachable() -> None:
+    """Skip the current test if no OpenShell gateway answers a health check."""
+    try:
+        from openshell import SandboxClient
+
+        SandboxClient(_OPENSHELL_GATEWAY_URL).health()
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        pytest.skip(f"OpenShell gateway not available: {exc}")
+
+
+def _wait_for_status(  # pylint: disable=inconsistent-return-statements
+    http_client: TestClient,
+    workflow_id: str,
+    predicate: Callable[[dict[str, Any]], bool],
+    timeout_s: int = 30,
+) -> dict[str, Any]:
+    """Poll GET /v1/workflows/{id} until predicate(body) holds or timeout_s elapses."""
+    for _ in range(timeout_s):
+        status_response = http_client.get(f"/v1/workflows/{workflow_id}")
+        assert status_response.status_code == 200
+        body: dict[str, Any] = status_response.json()
+        if predicate(body):
+            return body
+        time.sleep(1)
+    pytest.fail(
+        f"Workflow {workflow_id} did not reach the expected status in {timeout_s}s"
+    )
 
 
 @pytest.fixture(name="http_client")
@@ -125,6 +169,33 @@ class TestAgentRunHttpE2E:
         assert "healthy" in data["output"]
         assert "reason" in data["output"]
         assert data["token_usage"]["input_tokens"] > 0
+
+    @pytest.mark.ephemeral
+    def test_ephemeral_agent_run(self, http_client: TestClient) -> None:
+        """spawn:ephemeral agent run reaches a real OpenShell sandbox over HTTP.
+
+        Companion to test_agents_ephemeral_e2e.py's handler-direct coverage
+        -- this goes through real routing, auth dependency resolution, and
+        request/response validation instead of calling the handler function
+        directly.
+        """
+        _skip_if_gateway_unreachable()
+
+        response = http_client.post(
+            "/v1/agents/run",
+            json={
+                "prompt": "What is 9+9? Reply with just the number.",
+                "spawn": "ephemeral",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["output"] is not None
+        assert data["transcript"]
 
 
 class TestWorkflowHttpE2E:
@@ -242,3 +313,94 @@ class TestWorkflowHttpE2E:
         transcripts = transcripts_response.json()["transcripts"]
         assert "triage_result" in transcripts
         assert "remediate_result" in transcripts
+
+    def test_workflow_with_local_spawn_step(self, http_client: TestClient) -> None:
+        """A workflow step with spawn:local completes over real HTTP.
+
+        spawn=local runs the LLM call in a child subprocess
+        (SubprocessExecutor) -- previously untested at the /v1/workflows/*
+        HTTP layer (test_spawn_modes_e2e.py covers it at the step-executor
+        layer only, bypassing the endpoint entirely).
+        """
+        start_response = http_client.post(
+            "/v1/workflows/run",
+            json={
+                "definition": {
+                    "apiVersion": "v1",
+                    "kind": "AgentWorkflow",
+                    "metadata": {"name": "local-spawn-http-e2e"},
+                    "spec": {
+                        "steps": [
+                            {
+                                "name": "investigate",
+                                "type": "agent",
+                                "spawn": "local",
+                                "output_key": "investigate_result",
+                                "prompt": (
+                                    "Say one sentence confirming the "
+                                    "checkout-7f9 pod is healthy."
+                                ),
+                                "timeout_seconds": 120,
+                            },
+                        ]
+                    },
+                },
+                "provider": {"name": "openai", "model": "gpt-4o-mini"},
+            },
+        )
+
+        assert start_response.status_code == 202
+        workflow_id = start_response.json()["workflow_id"]
+        assert workflow_id
+
+        completed = _wait_for_status(
+            http_client, workflow_id, lambda body: bool(body["is_terminal"])
+        )
+        assert completed["status"] == "completed"
+        assert "investigate_result" in completed["steps"]
+
+    @pytest.mark.ephemeral
+    def test_workflow_with_ephemeral_spawn_step(self, http_client: TestClient) -> None:
+        """A workflow step with spawn:ephemeral completes over real HTTP.
+
+        Reaches a real OpenShell sandbox -- previously zero e2e coverage of
+        /v1/workflows/* with an ephemeral step existed at any layer.
+        """
+        _skip_if_gateway_unreachable()
+
+        start_response = http_client.post(
+            "/v1/workflows/run",
+            json={
+                "definition": {
+                    "apiVersion": "v1",
+                    "kind": "AgentWorkflow",
+                    "metadata": {"name": "ephemeral-spawn-http-e2e"},
+                    "spec": {
+                        "steps": [
+                            {
+                                "name": "investigate",
+                                "type": "agent",
+                                "spawn": "ephemeral",
+                                "output_key": "investigate_result",
+                                "prompt": (
+                                    "Say one sentence confirming the "
+                                    "checkout-7f9 pod is healthy."
+                                ),
+                                "timeout_seconds": 120,
+                            },
+                        ]
+                    },
+                },
+                "provider": {"name": "openai", "model": "gpt-4o-mini"},
+            },
+        )
+
+        assert start_response.status_code == 202
+        workflow_id = start_response.json()["workflow_id"]
+        assert workflow_id
+
+        completed = _wait_for_status(
+            http_client, workflow_id, lambda body: bool(body["is_terminal"])
+        )
+        assert completed["status"] == "completed"
+        assert "investigate_result" in completed["steps"]

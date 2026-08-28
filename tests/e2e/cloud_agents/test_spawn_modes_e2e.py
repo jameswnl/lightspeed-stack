@@ -171,6 +171,7 @@ class TestSpawnLocal:
         assert result.duration_ms > 0
 
 
+@pytest.mark.ephemeral
 class TestSpawnEphemeral:
     """E2E tests for spawn:ephemeral via OpenShell gateway."""
 

@@ -229,6 +229,7 @@ addopts = [
 markers = [
     "destructive: marks tests as destructive (deselect with '-m \"not destructive\"')",
     "order: controls test execution order (requires pytest-order plugin)",
+    "ephemeral: requires a live OpenShell gateway (deselect with '-m \"not ephemeral\"')",
 ]
 
 [tool.pylint.main]

@@ -172,6 +172,27 @@ test-e2e-tagged: ## Run e2e tests with E2E_BEHAVE_TAG_EXPR (default: all @cfg_*)
 test-e2e-tagged-local: ## Same as test-e2e-tagged without script wrapper
 	uv run behave --color --format pretty --tags="$(E2E_BEHAVE_TAG_EXPR)" -D dump_errors=true @tests/e2e/test_list.txt
 
+test-e2e-agents-workflows: ## Real-HTTP e2e tests for /v1/agents/run and /v1/workflows/* (needs OPENAI_API_KEY)
+	@if [ -z "$$OPENAI_API_KEY" ]; then \
+		echo "ERROR: OPENAI_API_KEY is not set."; \
+		exit 1; \
+	fi
+	@if [ -z "$(CONTAINER_RUNTIME)" ]; then \
+		echo "ERROR: No container runtime found. Install podman or docker."; \
+		exit 1; \
+	fi
+	@echo "Ensuring Postgres is up (needed for workflow run-state/transcript storage)..."
+	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d postgres
+	uv run pytest tests/e2e/cloud_agents/test_agents_workflow_http_e2e.py -v
+
+demo-agents-workflows: ## Curl-based live demo against a running server (make demo-agents-workflows TAB=tab1|tab2|tab3|discover)
+	@if ! curl -s -o /dev/null -w '' --max-time 2 "$${BASE_URL:-http://localhost:8090}/v1/info" 2>/dev/null; then \
+		echo "ERROR: no server reachable at $${BASE_URL:-http://localhost:8090}."; \
+		echo "Start one with: uv run make run-stack CONFIG=lightspeed-stack-harness.yaml"; \
+		exit 1; \
+	fi
+	./docs/cloud-agents-demo-curl.sh $(or $(TAB),tab1)
+
 benchmarks: ## Run benchmarks
 	uv run python -m pytest -vv tests/benchmarks/
 

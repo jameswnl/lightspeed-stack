@@ -187,7 +187,7 @@ test-e2e-agents-workflows: ## Real-HTTP e2e tests for /v1/agents/run and /v1/wor
 	fi
 	@echo "Ensuring Postgres is up (needed for workflow run-state/transcript storage)..."
 	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d --wait postgres
-	uv run pytest tests/e2e/cloud_agents/test_agents_workflow_http_e2e.py -v
+	uv run pytest tests/e2e/cloud_agents/test_agents_run_http_e2e.py tests/e2e/cloud_agents/test_workflows_http_e2e.py -v
 
 test-e2e-agents-workflows-mock: ## Real-HTTP e2e tests for spawn=none/local against a mock LLM (no OPENAI_API_KEY/gateway needed)
 	@if [ -z "$(CONTAINER_RUNTIME)" ]; then \
@@ -201,7 +201,8 @@ test-e2e-agents-workflows-mock: ## Real-HTTP e2e tests for spawn=none/local agai
 	@echo "Ensuring Postgres is up (needed for workflow run-state/transcript storage)..."
 	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d --wait postgres
 	OPENAI_API_KEY=sk-mock-ci-key LIGHTSPEED_E2E_USE_MOCK_LLM=1 uv run pytest \
-		tests/e2e/cloud_agents/test_agents_workflow_http_e2e.py \
+		tests/e2e/cloud_agents/test_agents_run_http_e2e.py \
+		tests/e2e/cloud_agents/test_workflows_http_e2e.py \
 		tests/e2e/cloud_agents/test_mock_llm_server.py \
 		tests/e2e/cloud_agents/test_mock_llm_env.py \
 		-v -m "not ephemeral"

@@ -203,9 +203,10 @@ class TestWorkflowHttpE2E:
         """A workflow with spawn:ephemeral steps pauses for approval, then completes.
 
         Companion automated coverage for docs/cloud-agents-demo-curl.sh's
-        tab3 -- previously that combination (ephemeral steps + a
-        human-approval gate in between) was only exercised manually via
-        the demo script, never asserted by an automated test.
+        workflow-ephemeral-approval scenario -- previously that combination
+        (ephemeral steps + a human-approval gate in between) was only
+        exercised manually via the demo script, never asserted by an
+        automated test.
         """
         skip_if_gateway_unreachable()
 
@@ -300,6 +301,14 @@ class TestWorkflowHttpE2E:
         )
         assert completed["status"] == "completed"
         assert "remediate_result" in completed["steps"]
+
+        transcripts_response = http_client.get(
+            f"/v1/workflows/{workflow_id}/transcripts"
+        )
+        assert transcripts_response.status_code == 200
+        transcripts = transcripts_response.json()["transcripts"]
+        assert "triage_result" in transcripts
+        assert "remediate_result" in transcripts
 
     @pytest.mark.ephemeral
     def test_workflow_with_ephemeral_spawn_step(self, http_client: TestClient) -> None:

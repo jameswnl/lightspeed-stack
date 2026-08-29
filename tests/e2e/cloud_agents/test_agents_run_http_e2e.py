@@ -1,9 +1,10 @@
 """Real HTTP e2e tests for POST /v1/agents/run.
 
-Companion automated coverage for docs/cloud-agents-demo-curl.sh's tab1/tab2
--- exercises an in-process and an ephemeral agent run through the actual
-FastAPI app over real HTTP (real routing, real auth dependency resolution,
-real request/response validation), unlike test_agents_run_handler_e2e.py
+Companion automated coverage for docs/cloud-agents-demo-curl.sh's
+agent-none/agent-ephemeral scenarios -- exercises an in-process and an
+ephemeral agent run through the actual FastAPI app over real HTTP (real
+routing, real auth dependency resolution, real request/response
+validation), unlike test_agents_run_handler_e2e.py
 (calls the handler function directly) or test_step_executor_e2e.py (calls
 the step-executor dispatch directly, bypassing the handler and HTTP both).
 
@@ -51,7 +52,7 @@ pytestmark = [
 
 
 class TestAgentRunHttpE2E:
-    """POST /v1/agents/run over real HTTP (mirrors demo-curl tab1/tab2)."""
+    """POST /v1/agents/run over real HTTP (mirrors demo-curl agent-none/agent-ephemeral)."""
 
     def test_in_process_agent_run(self, http_client: TestClient) -> None:
         """spawn:none agent run returns a structured, schema-conforming response."""

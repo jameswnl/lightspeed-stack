@@ -108,8 +108,8 @@ Registered in `pyproject.toml` and applied to every ephemeral-gated test
 
 `lightspeed-stack-harness.yaml` had no `spawner:` section at all, which
 meant `spawn=ephemeral` would 400 against a server started with it —
-including `docs/cloud-agents-demo-curl.sh`'s tab2 demo, which already
-documented an ephemeral flow that couldn't have worked. Added:
+including `docs/cloud-agents-demo-curl.sh`'s `agent-ephemeral` scenario,
+which already documented an ephemeral flow that couldn't have worked. Added:
 
 ```yaml
 spawner:

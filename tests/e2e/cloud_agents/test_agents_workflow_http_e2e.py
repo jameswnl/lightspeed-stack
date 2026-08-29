@@ -353,8 +353,14 @@ class TestWorkflowHttpE2E:
         workflow_id = start_response.json()["workflow_id"]
         assert workflow_id
 
+        # timeout_s > the step's own timeout_seconds=120 -- otherwise a
+        # slow-but-healthy run (real OpenAI latency) hits _wait_for_status's
+        # own timeout and pytest.fails before the step itself would time out.
         completed = _wait_for_status(
-            http_client, workflow_id, lambda body: bool(body["is_terminal"])
+            http_client,
+            workflow_id,
+            lambda body: bool(body["is_terminal"]),
+            timeout_s=150,
         )
         assert completed["status"] == "completed"
         assert "investigate_result" in completed["steps"]
@@ -399,8 +405,15 @@ class TestWorkflowHttpE2E:
         workflow_id = start_response.json()["workflow_id"]
         assert workflow_id
 
+        # timeout_s > the step's own timeout_seconds=120 -- sandbox boot +
+        # LLM on a live OpenShell gateway routinely exceeds 30s; the
+        # gateway-health skip above only covers an unreachable gateway, not
+        # a slow-but-healthy one.
         completed = _wait_for_status(
-            http_client, workflow_id, lambda body: bool(body["is_terminal"])
+            http_client,
+            workflow_id,
+            lambda body: bool(body["is_terminal"]),
+            timeout_s=150,
         )
         assert completed["status"] == "completed"
         assert "investigate_result" in completed["steps"]

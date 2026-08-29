@@ -195,7 +195,7 @@ test-e2e-agents-workflows-mock: ## Real-HTTP e2e tests for spawn=none/local agai
 		exit 1; \
 	fi
 	@echo "Ensuring Postgres is up (needed for workflow run-state/transcript storage)..."
-	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d postgres
+	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d --wait postgres
 	OPENAI_API_KEY=sk-mock-ci-key LIGHTSPEED_E2E_USE_MOCK_LLM=1 uv run pytest \
 		tests/e2e/cloud_agents/test_agents_workflow_http_e2e.py \
 		tests/e2e/cloud_agents/test_mock_llm_server.py \

@@ -186,10 +186,12 @@ class TestLocalInvestigateWorkflow:
     """E2E test for the local-investigate-alerts workflow.
 
     Merges the previous duplicate coverage of this workflow (there were
-    two near-identical copies of this class in different files, one with
-    a bespoke inline step loop and loose assertions, one using the shared
-    _run_workflow_steps() helper with the same loose assertions) into one,
-    using the shared helper with the stricter of the two assertion sets.
+    two near-identical copies of this class in different files: one with
+    a bespoke inline step loop and strict assertions -- all 4 steps
+    completed -- one using the shared _run_workflow_steps() helper with
+    looser assertions -- >=3 results, only triage_result checked) into
+    one, using the shared helper with the stricter of the two assertion
+    sets.
     """
 
     @pytest.fixture(name="workflow_def")

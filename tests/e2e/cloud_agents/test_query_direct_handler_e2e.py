@@ -7,8 +7,8 @@ the spawn=none step-executor tests in test_step_executor_e2e.py, since
 /v1/query/direct's happy path is a thin wrapper around the same
 DirectExecutor those tests already cover).
 
-Requires OPENAI_API_KEY (module-level config load only -- the error paths
-themselves never reach the LLM).
+No OPENAI_API_KEY needed -- these are pure validation-error paths that
+raise before any provider/LLM call is made.
 
 Usage:
     uv run pytest tests/e2e/cloud_agents/test_query_direct_handler_e2e.py -v -s
@@ -18,7 +18,6 @@ Usage:
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
@@ -28,11 +27,6 @@ from app.endpoints.query_direct import QueryDirectRequest, query_direct_handler
 from configuration import configuration
 
 from .conftest import AUTH, make_request
-
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY not set",
-)
 
 _CONFIG = {
     "name": "e2e-query-direct-handler-test",

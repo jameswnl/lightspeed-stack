@@ -39,9 +39,6 @@ _HARNESS_CONFIG = (
 )
 
 _OPENSHELL_GATEWAY_URL = os.environ.get("OPENSHELL_GATEWAY_URL", "localhost:17670")
-_SANDBOX_IMAGE = os.environ.get(
-    "LIGHTSPEED_SANDBOX_IMAGE", "quay.io/jameswong/lightspeed-agentic-sandbox:latest"
-)
 
 AUTH: AuthTuple = ("e2e-user", "e2e-tester", False, "")
 

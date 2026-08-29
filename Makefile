@@ -194,6 +194,10 @@ test-e2e-agents-workflows-mock: ## Real-HTTP e2e tests for spawn=none/local agai
 		echo "ERROR: No container runtime found. Install podman or docker."; \
 		exit 1; \
 	fi
+	@if ! $(CONTAINER_RUNTIME) compose version >/dev/null 2>&1; then \
+		echo "ERROR: '$(CONTAINER_RUNTIME) compose' is not available. Install the compose plugin."; \
+		exit 1; \
+	fi
 	@echo "Ensuring Postgres is up (needed for workflow run-state/transcript storage)..."
 	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d --wait postgres
 	OPENAI_API_KEY=sk-mock-ci-key LIGHTSPEED_E2E_USE_MOCK_LLM=1 uv run pytest \

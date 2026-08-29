@@ -1,13 +1,16 @@
 """Real HTTP e2e tests for POST /v1/workflows/*.
 
-Companion automated coverage for docs/cloud-agents-demo-curl.sh's tab3 --
-exercises workflow run/approve/transcripts and none/local/ephemeral steps
-through the actual FastAPI app over real HTTP (real routing, real auth
-dependency resolution, real request/response validation), unlike
-test_workflow_definitions_e2e.py (calls the step-executor dispatch
-directly per-step, bypassing the workflow engine, the handler, and HTTP)
-or test_workflow_tracing_e2e.py (calls LocalWorkflowRunner directly,
-bypassing the handler and HTTP, for tracing-specific assertions).
+Companion automated coverage for docs/cloud-agents-demo-curl.sh's
+workflow-ephemeral-approval / workflow-none-approval / workflow-local /
+workflow-ephemeral scenarios -- exercises workflow run/approve/transcripts
+across all three spawn
+modes, with and without a human-approval gate, through the actual FastAPI
+app over real HTTP (real routing, real auth dependency resolution, real
+request/response validation), unlike test_workflow_definitions_e2e.py
+(calls the step-executor dispatch directly per-step, bypassing the
+workflow engine, the handler, and HTTP) or test_workflow_tracing_e2e.py
+(calls LocalWorkflowRunner directly, bypassing the handler and HTTP, for
+tracing-specific assertions).
 
 Requires OPENAI_API_KEY and a reachable PostgreSQL matching
 lightspeed-stack-harness.yaml's database.postgres section (used for
@@ -196,6 +199,118 @@ class TestWorkflowHttpE2E:
         )
         assert completed["status"] == "completed"
         assert "investigate_result" in completed["steps"]
+
+    @pytest.mark.ephemeral
+    def test_workflow_with_ephemeral_approval(self, http_client: TestClient) -> None:
+        """A workflow with spawn:ephemeral steps pauses for approval, then completes.
+
+        Companion automated coverage for docs/cloud-agents-demo-curl.sh's
+        workflow-ephemeral-approval scenario -- previously that combination
+        (ephemeral steps + a human-approval gate in between) was only
+        exercised manually via the demo script, never asserted by an
+        automated test.
+        """
+        skip_if_gateway_unreachable()
+
+        start_response = http_client.post(
+            "/v1/workflows/run",
+            json={
+                "definition": {
+                    "apiVersion": "v1",
+                    "kind": "AgentWorkflow",
+                    "metadata": {"name": "triage-remediate-ephemeral-http-e2e"},
+                    "spec": {
+                        "steps": [
+                            {
+                                "name": "triage",
+                                "type": "agent",
+                                "spawn": "ephemeral",
+                                "output_key": "triage_result",
+                                "prompt": (
+                                    "Diagnose the checkout-7f9 pod issue. Assume "
+                                    "root cause is a memory leak. Report severity "
+                                    "and root cause."
+                                ),
+                                "output_schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "severity": {"type": "string"},
+                                        "root_cause": {"type": "string"},
+                                    },
+                                    "required": ["severity", "root_cause"],
+                                },
+                                "timeout_seconds": 120,
+                            },
+                            {
+                                "name": "approve",
+                                "type": "human-approval",
+                                "output_key": "approval",
+                                "message": (
+                                    "Root cause: "
+                                    "{{ steps.triage_result.output.root_cause }}. "
+                                    "Approve remediation?"
+                                ),
+                                "risk_level": "high",
+                            },
+                            {
+                                "name": "remediate",
+                                "type": "agent",
+                                "spawn": "ephemeral",
+                                "output_key": "remediate_result",
+                                "prompt": (
+                                    "Say one sentence confirming the fix for: "
+                                    "{{ steps.triage_result.output.root_cause }}"
+                                ),
+                                "condition": "steps.approval.output.approved == true",
+                                "timeout_seconds": 120,
+                            },
+                        ]
+                    },
+                },
+                "provider": {"name": "openai", "model": "gpt-4o-mini"},
+            },
+        )
+
+        assert start_response.status_code == 202
+        workflow_id = start_response.json()["workflow_id"]
+        assert workflow_id
+
+        # timeout_s > the step's own timeout_seconds=120 -- sandbox boot +
+        # LLM on a live OpenShell gateway routinely exceeds 30s.
+        paused = wait_for_status(
+            http_client,
+            workflow_id,
+            lambda body: body["status"] == "paused",
+            timeout_s=150,
+        )
+        assert "triage_result" in paused["steps"]
+
+        approve_response = http_client.post(
+            f"/v1/workflows/{workflow_id}/approve",
+            json={
+                "step_name": "approve",
+                "decision": "approved",
+                "approver": "http-e2e-test",
+            },
+        )
+        assert approve_response.status_code == 200
+
+        completed = wait_for_status(
+            http_client,
+            workflow_id,
+            lambda body: bool(body["is_terminal"]),
+            timeout_s=150,
+        )
+        assert completed["status"] == "completed"
+        assert "remediate_result" in completed["steps"]
+
+        transcripts_response = http_client.get(
+            f"/v1/workflows/{workflow_id}/transcripts"
+        )
+        assert transcripts_response.status_code == 200
+        transcripts = transcripts_response.json()["transcripts"]
+        assert "triage_result" in transcripts
+        assert "remediate_result" in transcripts
 
     @pytest.mark.ephemeral
     def test_workflow_with_ephemeral_spawn_step(self, http_client: TestClient) -> None:

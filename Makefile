@@ -207,13 +207,49 @@ test-e2e-agents-workflows-mock: ## Real-HTTP e2e tests for spawn=none/local agai
 		tests/e2e/cloud_agents/test_mock_llm_env.py \
 		-v -m "not ephemeral"
 
-demo-agents-workflows: ## Curl-based live demo against a running server (make demo-agents-workflows TAB=tab1|tab2|tab3|discover)
-	@if ! curl -s -o /dev/null --max-time 2 "$${BASE_URL:-http://localhost:8090}/v1/info" 2>/dev/null; then \
-		echo "ERROR: no server reachable at $${BASE_URL:-http://localhost:8090}."; \
-		echo "Start one with: uv run make run-stack CONFIG=lightspeed-stack-harness.yaml"; \
+demo-agents-workflows-server: ## Start lightspeed-stack ready for the cloud-agents demo (needs OPENAI_API_KEY + a reachable OpenShell gateway; run demo-agents-workflows against it from another terminal)
+	@# Note: this is a plain TCP-open check, not a real gRPC health check
+	@# (unlike pytest's skip_if_gateway_unreachable(), which calls
+	@# SandboxClient.health()) -- a non-OpenShell listener on this port
+	@# will pass here and only fail later, at the workflow-ephemeral demo
+	@# step. Good enough to fail fast on "nothing is listening"; don't
+	@# treat it as equivalent to the pytest skip.
+	@if [ -z "$$OPENAI_API_KEY" ]; then \
+		echo "ERROR: OPENAI_API_KEY is not set."; \
 		exit 1; \
 	fi
-	./docs/cloud-agents-demo-curl.sh $(or $(TAB),tab1)
+	@GATEWAY="$${OPENSHELL_GATEWAY_URL:-localhost:17670}"; \
+	HOST="$${GATEWAY%%:*}"; PORT="$${GATEWAY##*:}"; \
+	if ! (exec 3<>"/dev/tcp/$$HOST/$$PORT") 2>/dev/null; then \
+		echo "ERROR: OpenShell gateway not reachable at $$GATEWAY."; \
+		echo "Set OPENSHELL_GATEWAY_URL=<host:port> to point at your gateway (e.g. a Kind-deployed one)."; \
+		exit 1; \
+	else \
+		exec 3<&- 3>&-; \
+		echo "OpenShell gateway reachable at $$GATEWAY."; \
+	fi
+	@if [ -z "$(CONTAINER_RUNTIME)" ]; then \
+		echo "ERROR: No container runtime found. Install podman or docker."; \
+		exit 1; \
+	fi
+	@if ! $(CONTAINER_RUNTIME) compose version >/dev/null 2>&1; then \
+		echo "ERROR: '$(CONTAINER_RUNTIME) compose' is not available. Install the compose plugin."; \
+		exit 1; \
+	fi
+	@echo "Ensuring Postgres is up (needed for workflow run-state/transcript storage)..."
+	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d --wait postgres
+	@echo "Starting lightspeed-stack (lightspeed-stack-harness.yaml) -- Ctrl-C to stop."
+	@echo "From another terminal: make demo-agents-workflows SCENARIO=<scenario>"
+	OPENSHELL_GATEWAY_URL="$${OPENSHELL_GATEWAY_URL:-localhost:17670}" \
+		uv run python src/lightspeed_stack.py -c lightspeed-stack-harness.yaml
+
+demo-agents-workflows: ## Curl-based live demo against a running server (make demo-agents-workflows SCENARIO=agent-none|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral|discover)
+	@if ! curl -s -o /dev/null --max-time 2 "$${BASE_URL:-http://localhost:8090}/v1/info" 2>/dev/null; then \
+		echo "ERROR: no server reachable at $${BASE_URL:-http://localhost:8090}."; \
+		echo "Start one with: uv run make demo-agents-workflows-server"; \
+		exit 1; \
+	fi
+	./docs/cloud-agents-demo-curl.sh $(or $(SCENARIO),agent-none)
 
 benchmarks: ## Run benchmarks
 	uv run python -m pytest -vv tests/benchmarks/

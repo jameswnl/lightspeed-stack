@@ -40,3 +40,8 @@ workflow_engine:
   enabled: true
   max_concurrent_workflows: 10
   transcript_retention_days: 30
+
+spawner:
+  type: openshell
+  openshell_gateway_url: "${env.OPENSHELL_GATEWAY_URL:=localhost:17670}"
+  sandbox_image: "${env.LIGHTSPEED_SANDBOX_IMAGE:=quay.io/jameswong/lightspeed-agentic-sandbox:latest}"

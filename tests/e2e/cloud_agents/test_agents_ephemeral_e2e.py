@@ -119,6 +119,7 @@ def _make_request() -> Request:
     return request
 
 
+@pytest.mark.ephemeral
 class TestAgentRunEphemeralE2E:
     """POST /v1/agents/run with spawn=ephemeral, through the real handler."""
 

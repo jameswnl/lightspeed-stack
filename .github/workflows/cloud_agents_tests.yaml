@@ -44,3 +44,48 @@ jobs:
 
       - name: Run cloud-agents integration tests
         run: uv run pytest tests/integration/cloud_agents/ -v
+
+  e2e-mock:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lightspeed
+          POSTGRES_PASSWORD: lightspeed
+          POSTGRES_DB: lightspeed
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      OPENAI_API_KEY: sk-mock-ci-key
+      LIGHTSPEED_E2E_USE_MOCK_LLM: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          uv pip install --python 3.12 -e .
+          uv pip install -e "git+https://github.com/jameswnl/lightspeed-cloud-agents.git@main#egg=lightspeed-cloud-agents[local,kubernetes]"
+
+      # spawn=none/local e2e over real HTTP, against an in-process mock LLM
+      # (tests/e2e/cloud_agents/mock_llm_server.py) instead of real OpenAI --
+      # spawn=ephemeral needs a live OpenShell gateway, so it's excluded here
+      # and stays a manual/local-only run (see Makefile's
+      # test-e2e-agents-workflows target).
+      - name: Run mock-backed e2e tests (spawn=none/local)
+        run: |
+          uv run pytest \
+            tests/e2e/cloud_agents/test_agents_workflow_http_e2e.py \
+            tests/e2e/cloud_agents/test_mock_llm_server.py \
+            tests/e2e/cloud_agents/test_mock_llm_env.py \
+            -v -m "not ephemeral"

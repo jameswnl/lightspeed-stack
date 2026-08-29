@@ -208,6 +208,12 @@ test-e2e-agents-workflows-mock: ## Real-HTTP e2e tests for spawn=none/local agai
 		-v -m "not ephemeral"
 
 demo-agents-workflows-server: ## Start lightspeed-stack ready for the cloud-agents demo (needs OPENAI_API_KEY + a reachable OpenShell gateway; run demo-agents-workflows against it from another terminal)
+	@# Note: this is a plain TCP-open check, not a real gRPC health check
+	@# (unlike pytest's skip_if_gateway_unreachable(), which calls
+	@# SandboxClient.health()) -- a non-OpenShell listener on this port
+	@# will pass here and only fail later, at the workflow-ephemeral demo
+	@# step. Good enough to fail fast on "nothing is listening"; don't
+	@# treat it as equivalent to the pytest skip.
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
 		echo "ERROR: OPENAI_API_KEY is not set."; \
 		exit 1; \
@@ -240,7 +246,7 @@ demo-agents-workflows-server: ## Start lightspeed-stack ready for the cloud-agen
 demo-agents-workflows: ## Curl-based live demo against a running server (make demo-agents-workflows SCENARIO=agent-none|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral|discover)
 	@if ! curl -s -o /dev/null --max-time 2 "$${BASE_URL:-http://localhost:8090}/v1/info" 2>/dev/null; then \
 		echo "ERROR: no server reachable at $${BASE_URL:-http://localhost:8090}."; \
-		echo "Start one with: uv run make run-stack CONFIG=lightspeed-stack-harness.yaml"; \
+		echo "Start one with: uv run make demo-agents-workflows-server"; \
 		exit 1; \
 	fi
 	./docs/cloud-agents-demo-curl.sh $(or $(SCENARIO),agent-none)

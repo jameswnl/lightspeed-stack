@@ -1,7 +1,9 @@
 """Real HTTP e2e tests for POST /v1/workflows/*.
 
-Companion automated coverage for docs/cloud-agents-demo-curl.sh's tabs 3-6
--- exercises workflow run/approve/transcripts across all three spawn
+Companion automated coverage for docs/cloud-agents-demo-curl.sh's
+workflow-ephemeral-approval / workflow-none-approval / workflow-local /
+workflow-ephemeral scenarios -- exercises workflow run/approve/transcripts
+across all three spawn
 modes, with and without a human-approval gate, through the actual FastAPI
 app over real HTTP (real routing, real auth dependency resolution, real
 request/response validation), unlike test_workflow_definitions_e2e.py

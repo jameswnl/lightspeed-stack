@@ -1,14 +1,17 @@
-"""E2E tests executing cloud-agents example workflows via lightspeed-stack.
+"""Step-executor-dispatch e2e tests executing full workflow-definition YAMLs.
 
-Runs workflow steps sequentially using DirectExecutor, auto-approving
-human-approval steps. Verifies step chaining, output schemas, and
-transcript capture.
+Runs each workflow's steps sequentially via `get_step_executor(...).run(...)`
+(auto-approving human-approval steps), one layer below the real workflow
+engine -- see test_workflows_http_e2e.py for the same workflows exercised
+through the real /v1/workflows/* HTTP endpoint (with pause/approve/resume
+and real run-state persistence), and test_workflow_tracing_e2e.py for
+`LocalWorkflowRunner` exercised directly for trace-correlation assertions.
 
-Requires OPENAI_API_KEY. No PostgreSQL needed — runs without
+Requires OPENAI_API_KEY. No PostgreSQL needed -- runs without
 WorkflowStorageFactory.
 
 Usage:
-    uv run pytest tests/e2e/cloud_agents/test_workflow_execution_e2e.py -v -s
+    uv run pytest tests/e2e/cloud_agents/test_workflow_definitions_e2e.py -v -s
 """
 
 # pylint: disable=import-outside-toplevel,too-few-public-methods
@@ -180,7 +183,14 @@ class TestTriageClassifyWorkflow:
 
 
 class TestLocalInvestigateWorkflow:
-    """E2E test for the local-investigate-alerts workflow."""
+    """E2E test for the local-investigate-alerts workflow.
+
+    Merges the previous duplicate coverage of this workflow (there were
+    two near-identical copies of this class in different files, one with
+    a bespoke inline step loop and loose assertions, one using the shared
+    _run_workflow_steps() helper with the same loose assertions) into one,
+    using the shared helper with the stricter of the two assertion sets.
+    """
 
     @pytest.fixture(name="workflow_def")
     def workflow_def_fixture(self) -> dict[str, Any]:
@@ -196,11 +206,9 @@ class TestLocalInvestigateWorkflow:
         """All spawn:none/local steps complete, ephemeral steps skipped."""
         results = await _run_workflow_steps(workflow_def)
 
-        assert len(results) >= 3
-
-        triage = results.get("triage_result")
-        assert triage is not None
-        assert triage["status"] == "completed"
+        assert len(results) == 4
+        assert all(r["status"] == "completed" for r in results.values())
+        assert "triage_result" in results
 
 
 class TestSecurityAuditWorkflow:
@@ -249,7 +257,14 @@ class TestSecurityAuditWorkflow:
 
 
 class TestAllWorkflowDefinitions:
-    """Verify all workflow definitions parse and have executable steps."""
+    """Verify all workflow definitions parse and have executable steps.
+
+    test_all_definitions_valid merges the previous duplicate parse-check
+    (there was a second, near-identical copy of "every workflow YAML
+    parses into WorkflowDefinition" in a different file) -- keeping both
+    sets of assertions: overall shape (steps/name present) and, for
+    spawn:none steps specifically, that name/output_key are set.
+    """
 
     def test_all_definitions_valid(self) -> None:
         """All YAML files parse into valid WorkflowDefinitions."""
@@ -265,6 +280,11 @@ class TestAllWorkflowDefinitions:
             definition = WorkflowDefinition.model_validate(raw)
             assert definition.spec.steps, f"{wf_file.name}: no steps"
             assert definition.metadata.get("name"), f"{wf_file.name}: no name"
+
+            none_steps = [s for s in definition.spec.steps if s.spawn == "none"]
+            for step in none_steps:
+                assert step.name, f"{wf_file.name}: step missing name"
+                assert step.output_key, f"{wf_file.name}: step missing output_key"
 
     @pytest.mark.asyncio
     async def test_all_spawn_none_steps_execute(self) -> None:

@@ -1,16 +1,23 @@
-"""E2E tests for different spawn modes (none, local, ephemeral).
+"""Step-executor-dispatch e2e tests for a single agent step.
 
-Tests agent execution across all three isolation tiers against real LLMs.
+Calls `get_step_executor(...).run(...)`/`.run_stream(...)` (or, for
+ephemeral, `cloud_agents.workflow.core.step_runner.run_step(...)`)
+directly -- bypassing the `/v1/agents/run` handler and FastAPI routing
+entirely, one layer below test_agents_run_handler_e2e.py. See
+test_workflow_definitions_e2e.py for the same layer applied to a full
+multi-step workflow YAML instead of a single step.
 
-- spawn:none — in-process (always available)
-- spawn:local — subprocess (always available)
-- spawn:ephemeral — OpenShell gateway (requires gateway + sandbox image)
+Covers all three spawn tiers against real LLMs:
+- spawn:none -- in-process (always available)
+- spawn:local -- subprocess (always available)
+- spawn:ephemeral -- OpenShell gateway (requires gateway + sandbox image,
+  marked `ephemeral` so CI can deselect with `-m "not ephemeral"`)
 
 Ephemeral tests need an OpenShell gateway configured with:
 - [openshell.drivers.podman] grpc_endpoint/supervisor_image/default_image
   so sandboxes can reach the gateway on boot
 - [openshell.gateway.gateway_jwt] (signing_key_path/public_key_path/kid_path)
-  so the gateway can mint each sandbox's OPENSHELL_SANDBOX_TOKEN_FILE —
+  so the gateway can mint each sandbox's OPENSHELL_SANDBOX_TOKEN_FILE --
   without it sandboxes fail with "no sandbox token source available"
 - [openshell.drivers.kubernetes] namespace, if the gateway itself runs as a
   K8s pod (it still bootstraps a K8s client for its own identity even when
@@ -23,8 +30,10 @@ cloud_agents.spawner.factory's own default. Override with
 OPENSHELL_GATEWAY_URL=localhost:9080 for `make kind-openshell-up` in
 ~/ws/local-infra (its Service uses a non-default port).
 
+Requires OPENAI_API_KEY.
+
 Usage:
-    uv run pytest tests/e2e/cloud_agents/test_spawn_modes_e2e.py -v -s
+    uv run pytest tests/e2e/cloud_agents/test_step_executor_e2e.py -v -s
 """
 
 # pylint: disable=import-outside-toplevel,too-few-public-methods
@@ -35,7 +44,6 @@ import os
 from typing import Any
 
 import pytest
-import yaml
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("OPENAI_API_KEY"),
@@ -256,67 +264,98 @@ class TestSpawnEphemeral:
         assert len(events) >= 1
 
 
-class TestLocalInvestigateWorkflow:
-    """E2E test running the local-investigate workflow with mixed spawn modes."""
+class TestStreamingExecution:
+    """E2E test for spawn:none streaming via run_stream."""
 
     @pytest.mark.asyncio
-    async def test_full_workflow(self) -> None:
-        """Workflow with none + local steps completes."""
-        from pathlib import Path
-
+    async def test_stream_complete_event_has_output(self) -> None:
+        """Complete event from stream has output and metrics."""
         from cloud_agents.workflow.executor.step.base import StepInput
         from cloud_agents.workflow.executor.step.dispatch import get_step_executor
 
-        wf_path = (
-            Path(__file__).resolve().parent.parent.parent.parent.parent
-            / "lightspeed-cloud-agents"
-            / "examples"
-            / "workflow-definitions"
-            / "local-investigate-workflow.yaml"
-        )
-        if not wf_path.exists():
-            pytest.skip("lightspeed-cloud-agents repo not found")
-
-        wf = yaml.safe_load(wf_path.read_text(encoding="utf-8"))
-
-        steps = wf["spec"]["steps"]
-        results: dict[str, Any] = {}
-
-        for step in steps:
-            name = step["name"]
-            step_type = step.get("type", "agent")
-            spawn = step.get("spawn", "none")
-            output_key = step.get("output_key", name)
-
-            if step_type == "human-approval":
-                results[output_key] = {
-                    "status": "completed",
-                    "output": {"approved": True},
-                }
-                continue
-
-            if spawn not in ("none", "local"):
-                results[output_key] = {
-                    "status": "skipped",
-                    "output": None,
-                }
-                continue
-
-            executor = get_step_executor({"name": name, "spawn": spawn}, spawner=None)
-            result = await executor.run(
-                StepInput(
-                    prompt=step.get("prompt", ""),
-                    provider=_PROVIDER,
-                    system_prompt=step.get("instructions"),
-                    context=results,
-                    step_name=name,
-                    output_key=output_key,
-                )
+        executor = get_step_executor({"name": "test", "spawn": "none"}, spawner=None)
+        events = []
+        async for event in executor.run_stream(
+            StepInput(
+                prompt="What is 1+1? Reply with just the number.",
+                provider=_PROVIDER,
+                step_name="test",
+                output_key="result",
             )
-            results[output_key] = {
-                "status": result.status,
-                "output": result.output,
-            }
+        ):
+            events.append(event)
 
-        assert len(results) == 4
-        assert all(r["status"] == "completed" for r in results.values())
+        assert len(events) >= 1
+        complete = [e for e in events if e.type == "complete"]
+        assert len(complete) == 1
+        assert complete[0].result.status == "completed"
+        assert complete[0].result.input_tokens > 0
+        assert complete[0].result.output_tokens > 0
+        assert complete[0].result.duration_ms > 0
+        assert "2" in str(complete[0].result.output)
+
+
+class TestStepResultShape:
+    """Verify StepResult (spawn:none) has the expected fields."""
+
+    @pytest.mark.asyncio
+    async def test_result_has_expected_fields(self) -> None:
+        """StepResult from DirectExecutor has status, output, tokens."""
+        from cloud_agents.workflow.executor.step.base import StepInput
+        from cloud_agents.workflow.executor.step.dispatch import get_step_executor
+
+        executor = get_step_executor({"name": "test", "spawn": "none"}, spawner=None)
+        result = await executor.run(
+            StepInput(
+                prompt="Say hi.",
+                provider=_PROVIDER,
+                step_name="test",
+                output_key="result",
+            )
+        )
+
+        assert result.status == "completed"
+        assert result.output is not None
+        assert isinstance(result.input_tokens, int)
+        assert isinstance(result.output_tokens, int)
+        assert result.input_tokens > 0
+        assert result.output_tokens > 0
+        assert result.duration_ms > 0
+
+    @pytest.mark.asyncio
+    async def test_result_has_transcript(self) -> None:
+        """StepResult includes transcript entries."""
+        from cloud_agents.workflow.executor.step.base import StepInput
+        from cloud_agents.workflow.executor.step.dispatch import get_step_executor
+
+        executor = get_step_executor({"name": "test", "spawn": "none"}, spawner=None)
+        result = await executor.run(
+            StepInput(
+                prompt="What is Python?",
+                provider=_PROVIDER,
+                system_prompt="One sentence max.",
+                step_name="test",
+                output_key="result",
+            )
+        )
+
+        assert result.status == "completed"
+        assert isinstance(result.transcript, list)
+        assert len(result.transcript) >= 1
+
+
+class TestPromptValidation:
+    """Validation helpers used by the step-executor path.
+
+    Note: this doesn't exercise the step-executor itself, just the
+    private `_validate_prompt()` function it (and query_direct_handler)
+    call before dispatching -- arguably a tests/unit candidate rather
+    than e2e, kept here as-is pending a separate decision on moving it.
+    """
+
+    def test_stream_validation_error(self) -> None:
+        """Validation helpers raise on invalid input."""
+        from workflow.query_executor import _validate_prompt
+
+        with pytest.raises(ValueError, match="maximum length"):
+            _validate_prompt("x" * 200_000)

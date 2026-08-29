@@ -85,7 +85,8 @@ jobs:
       - name: Run mock-backed e2e tests (spawn=none/local)
         run: |
           uv run pytest \
-            tests/e2e/cloud_agents/test_agents_workflow_http_e2e.py \
+            tests/e2e/cloud_agents/test_agents_run_http_e2e.py \
+            tests/e2e/cloud_agents/test_workflows_http_e2e.py \
             tests/e2e/cloud_agents/test_mock_llm_server.py \
             tests/e2e/cloud_agents/test_mock_llm_env.py \
             -v -m "not ephemeral"

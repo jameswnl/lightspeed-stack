@@ -32,11 +32,16 @@ inside `definition.spec.steps[].spawn`, read directly by the step
 dispatcher (`cloud_agents.workflow.executor.step.dispatch.get_step_executor`).
 So `/v1/workflows/run` already supported `local`/`ephemeral` steps over
 real HTTP before this change — the gap was purely a missing test, not
-missing functionality. `test_agents_workflow_http_e2e.py` gained
+missing functionality. `test_workflows_http_e2e.py` gained
 `test_workflow_with_local_spawn_step` and
 `test_workflow_with_ephemeral_spawn_step` accordingly, and
-`TestAgentRunHttpE2E` gained `test_ephemeral_agent_run` to cover the last
-real gap (agents×ephemeral had only handler-direct coverage before).
+`test_agents_run_http_e2e.py::TestAgentRunHttpE2E` gained
+`test_ephemeral_agent_run` to cover the last real gap (agents×ephemeral
+had only handler-direct coverage before).
+
+(These two files started as one combined `test_agents_workflow_http_e2e.py`
+and were later split by endpoint as part of a broader
+`tests/e2e/cloud_agents/` reorganization by testing layer.)
 
 ### Mock LLM server for CI
 
@@ -75,7 +80,7 @@ as before; set (what CI does), `OPENAI_BASE_URL` is redirected to the
 mock for the session.
 
 **Scope warning:** this only applies safely to
-`test_agents_workflow_http_e2e.py` (plus the mock's own self-tests) —
+`test_agents_run_http_e2e.py`/`test_workflows_http_e2e.py` (plus the mock's own self-tests) —
 every other file in `tests/e2e/cloud_agents/` asserts real-world semantic
 LLM content (e.g. `"paris" in output`) that only a real model can produce,
 and fails confusingly (not due to a real bug) if run with the mock
@@ -124,8 +129,35 @@ automatically on every push/PR to `harness` (same trigger as the existing
 unit/integration job): a `postgres:16` service matching the harness
 config's credentials, `OPENAI_API_KEY=sk-mock-ci-key` +
 `LIGHTSPEED_E2E_USE_MOCK_LLM=1`, running
-`test_agents_workflow_http_e2e.py` plus the mock's own self-tests with
+`test_agents_run_http_e2e.py` and `test_workflows_http_e2e.py` plus the mock's own self-tests with
 `-m "not ephemeral"`.
+
+## File organization by testing layer
+
+`tests/e2e/cloud_agents/` is organized by which layer of the stack a test
+actually exercises, not just by topic -- an earlier version of this suite
+used an undifferentiated `*_e2e.py` suffix for tests spanning five
+different layers, which produced misleading names (e.g. a `TestQueryDirectE2E`
+class that never touched `/v1/query/direct`) and duplicated coverage
+(the same workflow YAML executed near-identically under the same class
+name in two different files). Current layout:
+
+| File | Layer | Covers |
+|---|---|---|
+| `test_agents_run_http_e2e.py` | real HTTP (`TestClient`) | `/v1/agents/run`, spawn none+ephemeral |
+| `test_workflows_http_e2e.py` | real HTTP (`TestClient`) | `/v1/workflows/*`, spawn none+local+ephemeral |
+| `test_agents_run_handler_e2e.py` | handler-direct (`handler.__wrapped__(...)`) | `/v1/agents/run`, spawn none+ephemeral |
+| `test_query_direct_handler_e2e.py` | handler-direct | `/v1/query/direct` error paths |
+| `test_step_executor_e2e.py` | step-executor dispatch (`get_step_executor(...).run(...)`) | single-step execution, spawn none+local+ephemeral |
+| `test_workflow_definitions_e2e.py` | step-executor dispatch | full workflow-YAML execution, one step-executor call per step |
+| `test_otel_tracing_e2e.py` | mid-layer (`execute_query_via_direct_executor`) | trace/span assertions for the query/direct path |
+| `test_workflow_tracing_e2e.py` | `LocalWorkflowRunner` directly | trace/span assertions for the workflow-engine path |
+| `mock_llm_server.py`, `mock_llm_env.py`, `test_mock_llm_*.py`, `jaeger_helpers.py`, `conftest.py` | infra | shared fixtures/mocks, not endpoint tests themselves |
+
+Rule of thumb when adding a new e2e test here: pick the file whose layer
+matches how you're actually invoking the code (real HTTP vs. handler vs.
+step-executor), not the file whose name sounds topically closest -- that's
+exactly the mismatch that caused the confusion this reorg fixed.
 
 ## Running the full matrix locally
 

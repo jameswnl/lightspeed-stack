@@ -12,6 +12,12 @@ llama_stack:
   use_as_library_client: false
   url: http://localhost:8321
   allow_degraded_mode: true
+  # cloud-agents doesn't use Llama Stack at all -- pydantic-ai talks to
+  # OpenAI directly -- so fail fast into degraded mode instead of the
+  # default 5 retries x 2s (~10s+ of pure startup wait for a dependency
+  # this harness config's actual workload never touches).
+  max_retries: 1
+  retry_delay: 1
 
 user_data_collection:
   feedback_enabled: false

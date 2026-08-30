@@ -251,6 +251,28 @@ demo-agents-workflows: ## Curl-based live demo against a running server (make de
 	fi
 	./docs/cloud-agents-demo-curl.sh $(or $(SCENARIO),agent-none)
 
+demo-agents-workflows-all: ## Run every demo scenario against a running server (see demo-agents-workflows-server); does not include discover
+	@if ! curl -s -o /dev/null --max-time 2 "$${BASE_URL:-http://localhost:8090}/v1/info" 2>/dev/null; then \
+		echo "ERROR: no server reachable at $${BASE_URL:-http://localhost:8090}."; \
+		echo "Start one with: uv run make demo-agents-workflows-server"; \
+		exit 1; \
+	fi
+	@failed=""; \
+	for scenario in agent-none agent-ephemeral workflow-ephemeral-approval workflow-none-approval workflow-local workflow-ephemeral; do \
+		echo; \
+		echo "########## $$scenario ##########"; \
+		if ! ./docs/cloud-agents-demo-curl.sh "$$scenario"; then \
+			failed="$$failed $$scenario"; \
+		fi; \
+	done; \
+	echo; \
+	if [ -n "$$failed" ]; then \
+		echo "FAILED scenarios:$$failed"; \
+		exit 1; \
+	else \
+		echo "All scenarios completed."; \
+	fi
+
 benchmarks: ## Run benchmarks
 	uv run python -m pytest -vv tests/benchmarks/
 

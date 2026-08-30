@@ -119,9 +119,16 @@ class TestWorkflowHttpE2E:
         workflow_id = start_response.json()["workflow_id"]
         assert workflow_id
 
+        # Accept any terminal-ish status, not just "paused" -- a workflow
+        # that fails immediately (never pausing) would otherwise burn the
+        # full timeout budget before the predicate ever matches.
         paused = wait_for_status(
-            http_client, workflow_id, lambda body: body["status"] == "paused"
+            http_client,
+            workflow_id,
+            lambda body: body["status"]
+            in ("paused", "completed", "failed", "cancelled"),
         )
+        assert paused["status"] == "paused", paused
         assert "triage_result" in paused["steps"]
 
         approve_response = http_client.post(
@@ -276,13 +283,18 @@ class TestWorkflowHttpE2E:
         assert workflow_id
 
         # timeout_s > the step's own timeout_seconds=120 -- sandbox boot +
-        # LLM on a live OpenShell gateway routinely exceeds 30s.
+        # LLM on a live OpenShell gateway routinely exceeds 30s. Accept any
+        # terminal-ish status, not just "paused" -- a workflow that fails
+        # immediately (e.g. a gateway/credential error) would otherwise
+        # burn the full 150s budget before the predicate ever matches.
         paused = wait_for_status(
             http_client,
             workflow_id,
-            lambda body: body["status"] == "paused",
+            lambda body: body["status"]
+            in ("paused", "completed", "failed", "cancelled"),
             timeout_s=150,
         )
+        assert paused["status"] == "paused", paused
         assert "triage_result" in paused["steps"]
 
         approve_response = http_client.post(

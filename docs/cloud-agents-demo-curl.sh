@@ -156,7 +156,12 @@ workflow_ephemeral_approval() {
 
   echo
   echo "-- Waiting for status 'paused' at 'approve' --"
-  wait_for_status "$wf_id" "paused" 150
+  wait_for_status "$wf_id" "paused failed cancelled completed" 150
+  status=$(curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id" | jq -r .status)
+  if [[ "$status" != "paused" ]]; then
+    echo "ERROR: workflow did not pause for approval (status: $status)" >&2
+    exit 1
+  fi
 
   echo
   echo "-- Approving 'approve' step --"
@@ -227,7 +232,12 @@ workflow_none_approval() {
 
   echo
   echo "-- Waiting for status 'paused' at 'approve' --"
-  wait_for_status "$wf_id" "paused"
+  wait_for_status "$wf_id" "paused failed cancelled completed"
+  status=$(curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id" | jq -r .status)
+  if [[ "$status" != "paused" ]]; then
+    echo "ERROR: workflow did not pause for approval (status: $status)" >&2
+    exit 1
+  fi
 
   echo
   echo "-- Approving 'approve' step --"

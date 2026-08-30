@@ -47,7 +47,8 @@ discover() {
 
 agent_none() {
   echo "== Agent — In-Process (spawn: none) =="
-  curl -s -X POST "$BASE_URL/v1/agents/run" \
+  local resp status
+  resp=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/v1/agents/run" \
     "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
     -H "Content-Type: application/json" \
     -d '{
@@ -62,12 +63,16 @@ agent_none() {
         "properties": { "healthy": {"type": "boolean"}, "reason": {"type": "string"} },
         "required": ["healthy", "reason"]
       }
-    }' | jq
+    }')
+  status="${resp##*$'\n'}"
+  echo "${resp%$'\n'*}" | jq
+  [[ "$status" -lt 400 ]]
 }
 
 agent_ephemeral() {
   echo "== Agent — OpenShell (spawn: ephemeral) =="
-  curl -s -X POST "$BASE_URL/v1/agents/run" \
+  local resp status
+  resp=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/v1/agents/run" \
     "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
     -H "Content-Type: application/json" \
     -d '{
@@ -76,7 +81,10 @@ agent_ephemeral() {
       "provider": "openai",
       "model": "gpt-4o-mini",
       "mcp_servers": [{"name": "kubectl-mcp", "url": "http://kubectl-mcp:8000/mcp"}]
-    }' | jq
+    }')
+  status="${resp##*$'\n'}"
+  echo "${resp%$'\n'*}" | jq
+  [[ "$status" -lt 400 ]]
 }
 
 wait_for_status() {

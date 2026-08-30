@@ -15,9 +15,10 @@ llama_stack:
   # cloud-agents doesn't use Llama Stack at all -- pydantic-ai talks to
   # OpenAI directly -- so fail fast into degraded mode instead of the
   # default 5 retries x 2s (~10s+ of pure startup wait for a dependency
-  # this harness config's actual workload never touches).
+  # this harness config's actual workload never touches). No retry_delay
+  # override needed: with max_retries=1 the check never sleeps between
+  # attempts (there's only one).
   max_retries: 1
-  retry_delay: 1
 
 user_data_collection:
   feedback_enabled: false

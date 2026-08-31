@@ -113,7 +113,7 @@ wait_for_status() {
 
 workflow_ephemeral_approval() {
   echo "== Workflow — OpenShell + approval (spawn: ephemeral, POST /v1/workflows/run) =="
-  local resp wf_id
+  local resp wf_id status
 
   resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
     "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
@@ -181,6 +181,11 @@ workflow_ephemeral_approval() {
   echo
   echo "-- Waiting for a terminal status --"
   wait_for_status "$wf_id" "completed failed cancelled" 150
+  status=$(curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id" | jq -r .status)
+  if [[ "$status" != "completed" ]]; then
+    echo "ERROR: workflow did not complete successfully (status: $status)" >&2
+    exit 1
+  fi
 
   echo
   echo "-- Per-step transcripts --"
@@ -189,7 +194,7 @@ workflow_ephemeral_approval() {
 
 workflow_none_approval() {
   echo "== Workflow — In-Process + approval (spawn: none, POST /v1/workflows/run) =="
-  local resp wf_id
+  local resp wf_id status
 
   resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
     "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
@@ -257,6 +262,11 @@ workflow_none_approval() {
   echo
   echo "-- Waiting for a terminal status --"
   wait_for_status "$wf_id" "completed failed cancelled"
+  status=$(curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id" | jq -r .status)
+  if [[ "$status" != "completed" ]]; then
+    echo "ERROR: workflow did not complete successfully (status: $status)" >&2
+    exit 1
+  fi
 
   echo
   echo "-- Per-step transcripts --"
@@ -265,7 +275,7 @@ workflow_none_approval() {
 
 workflow_local() {
   echo "== Workflow — Subprocess (spawn: local, POST /v1/workflows/run) =="
-  local resp wf_id
+  local resp wf_id status
 
   resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
     "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
@@ -299,6 +309,11 @@ workflow_local() {
   echo
   echo "-- Waiting for a terminal status --"
   wait_for_status "$wf_id" "completed failed cancelled" 150
+  status=$(curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id" | jq -r .status)
+  if [[ "$status" != "completed" ]]; then
+    echo "ERROR: workflow did not complete successfully (status: $status)" >&2
+    exit 1
+  fi
 
   echo
   echo "-- Per-step transcripts --"
@@ -307,7 +322,7 @@ workflow_local() {
 
 workflow_ephemeral() {
   echo "== Workflow — OpenShell, no approval (spawn: ephemeral, POST /v1/workflows/run) =="
-  local resp wf_id
+  local resp wf_id status
 
   resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
     "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
@@ -341,6 +356,11 @@ workflow_ephemeral() {
   echo
   echo "-- Waiting for a terminal status --"
   wait_for_status "$wf_id" "completed failed cancelled" 150
+  status=$(curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id" | jq -r .status)
+  if [[ "$status" != "completed" ]]; then
+    echo "ERROR: workflow did not complete successfully (status: $status)" >&2
+    exit 1
+  fi
 
   echo
   echo "-- Per-step transcripts --"

@@ -12,6 +12,7 @@ caching: only re-mints when the cached token is near its expiry.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Optional
 
@@ -54,9 +55,15 @@ class OidcClientCredentialsTokenProvider:
         self._audience = audience
         self._cached_token: Optional[str] = None
         self._expires_at: float = 0.0
+        self._lock = threading.Lock()
 
     def get_token(self) -> str:
         """Return a cached token, or mint a fresh one if near expiry.
+
+        Guarded by a lock: get_token() is called from multiple threads
+        (asyncio.to_thread workers, gRPC interceptor threads) under a
+        shared spawner instance, so an unguarded check-then-fetch could
+        race and mint redundant tokens right at the expiry boundary.
 
         Returns:
             A valid OIDC access token.
@@ -64,12 +71,13 @@ class OidcClientCredentialsTokenProvider:
         Raises:
             OidcTokenFetchError: If minting a fresh token fails.
         """
-        if (
-            self._cached_token is not None
-            and time.time() < self._expires_at - _EXPIRY_SAFETY_MARGIN_SECONDS
-        ):
-            return self._cached_token
-        return self._fetch_token()
+        with self._lock:
+            if (
+                self._cached_token is not None
+                and time.time() < self._expires_at - _EXPIRY_SAFETY_MARGIN_SECONDS
+            ):
+                return self._cached_token
+            return self._fetch_token()
 
     def _fetch_token(self) -> str:
         """Mint a fresh access token via the client-credentials grant.
@@ -79,7 +87,8 @@ class OidcClientCredentialsTokenProvider:
 
         Raises:
             OidcTokenFetchError: If the request fails, returns a non-2xx
-                status, or the response has no access_token field.
+                status, a non-JSON or malformed-shape body, or a
+                non-numeric expires_in.
         """
         data: dict[str, str] = {
             "grant_type": "client_credentials",
@@ -97,7 +106,14 @@ class OidcClientCredentialsTokenProvider:
                 f"Failed to fetch OIDC access token from {self._token_endpoint}: {exc}"
             ) from exc
 
-        payload: dict[str, Any] = response.json()
+        try:
+            payload: dict[str, Any] = response.json()
+        except ValueError as exc:
+            raise OidcTokenFetchError(
+                f"OIDC token endpoint {self._token_endpoint} returned a "
+                "non-JSON response"
+            ) from exc
+
         token = payload.get("access_token")
         if not token:
             raise OidcTokenFetchError(
@@ -105,8 +121,15 @@ class OidcClientCredentialsTokenProvider:
                 "access_token field"
             )
 
-        expires_in = payload.get("expires_in", 0)
+        try:
+            expires_in = float(payload.get("expires_in", 0))
+        except (TypeError, ValueError) as exc:
+            raise OidcTokenFetchError(
+                f"OIDC token endpoint {self._token_endpoint} returned a "
+                f"non-numeric expires_in: {payload.get('expires_in')!r}"
+            ) from exc
+
         self._cached_token = token
-        self._expires_at = time.time() + float(expires_in)
+        self._expires_at = time.time() + expires_in
         logger.info("Fetched fresh OIDC access token (expires_in=%ss)", expires_in)
         return str(token)

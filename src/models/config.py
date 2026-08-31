@@ -3293,20 +3293,27 @@ class SpawnerConfiguration(ConfigurationBase):
             ValueError: If OIDC fields are partially set, or combined with
                 openshell_bearer_token.
         """
-        oidc_fields = {
+        required_oidc_fields = {
             "openshell_oidc_issuer": self.openshell_oidc_issuer,
             "openshell_oidc_client_id": self.openshell_oidc_client_id,
             "openshell_oidc_client_secret": self.openshell_oidc_client_secret,
         }
-        set_oidc_fields = [name for name, value in oidc_fields.items() if value]
-        if set_oidc_fields and len(set_oidc_fields) != len(oidc_fields):
-            missing = sorted(set(oidc_fields) - set(set_oidc_fields))
+        all_oidc_fields = {
+            **required_oidc_fields,
+            "openshell_oidc_audience": self.openshell_oidc_audience,
+        }
+        any_oidc_field_set = any(value for value in all_oidc_fields.values())
+        set_required_fields = [
+            name for name, value in required_oidc_fields.items() if value
+        ]
+        if any_oidc_field_set and len(set_required_fields) != len(required_oidc_fields):
+            missing = sorted(set(required_oidc_fields) - set(set_required_fields))
             raise ValueError(
                 "openshell_oidc_issuer, openshell_oidc_client_id, and "
                 "openshell_oidc_client_secret must all be set together "
                 f"for OIDC client-credentials auth; missing: {missing}"
             )
-        if set_oidc_fields and self.openshell_bearer_token:
+        if any_oidc_field_set and self.openshell_bearer_token:
             raise ValueError(
                 "openshell_bearer_token and the openshell_oidc_* fields are "
                 "mutually exclusive -- set one or the other, not both."

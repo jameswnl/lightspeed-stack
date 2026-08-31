@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import httpx
@@ -193,3 +194,74 @@ def test_get_token_raises_clear_error_on_non_2xx_status(mocker: MockerFixture) -
 
     with pytest.raises(OidcTokenFetchError, match="Failed to fetch OIDC access token"):
         provider.get_token()
+
+
+def test_get_token_raises_clear_error_on_non_json_response(
+    mocker: MockerFixture,
+) -> None:
+    """A 200 response with a non-JSON body raises OidcTokenFetchError, not ValueError."""
+    response = mocker.MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.side_effect = ValueError("Expecting value: line 1 column 1")
+    mocker.patch(
+        "workflow.openshell_oidc_token_provider.httpx.post", return_value=response
+    )
+    provider = OidcClientCredentialsTokenProvider(
+        issuer="https://keycloak.example.com/realms/agents",
+        client_id="my-client",
+        client_secret="my-secret",
+    )
+
+    with pytest.raises(OidcTokenFetchError, match="non-JSON response"):
+        provider.get_token()
+
+
+def test_get_token_raises_clear_error_on_non_numeric_expires_in(
+    mocker: MockerFixture,
+) -> None:
+    """A response with a non-numeric expires_in raises OidcTokenFetchError."""
+    response = mocker.MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        "access_token": "token-1",
+        "expires_in": "not-a-number",
+    }
+    mocker.patch(
+        "workflow.openshell_oidc_token_provider.httpx.post", return_value=response
+    )
+    provider = OidcClientCredentialsTokenProvider(
+        issuer="https://keycloak.example.com/realms/agents",
+        client_id="my-client",
+        client_secret="my-secret",
+    )
+
+    with pytest.raises(OidcTokenFetchError, match="non-numeric expires_in"):
+        provider.get_token()
+
+
+def test_get_token_is_thread_safe_under_concurrent_calls(mocker: MockerFixture) -> None:
+    """Concurrent get_token() calls on an empty cache mint exactly one token.
+
+    Regression test for the lock around check-then-fetch: without it,
+    multiple threads racing at the expiry boundary (or on first use) could
+    each independently decide the cache is stale and mint redundant tokens.
+    """
+    mock_post = _mock_post(mocker, access_token="fresh-token", expires_in=300)
+    provider = OidcClientCredentialsTokenProvider(
+        issuer="https://keycloak.example.com/realms/agents",
+        client_id="my-client",
+        client_secret="my-secret",
+    )
+
+    results: list[str] = []
+    threads = [
+        threading.Thread(target=lambda: results.append(provider.get_token()))
+        for _ in range(10)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert results == ["fresh-token"] * 10
+    mock_post.assert_called_once()

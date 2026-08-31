@@ -261,6 +261,10 @@ def test_spawner_configuration_openshell_oidc_defaults_to_none() -> None:
             },
             id="missing-client_secret",
         ),
+        pytest.param(
+            {"openshell_oidc_audience": "my-audience"},
+            id="audience-only",
+        ),
     ],
 )
 def test_spawner_configuration_openshell_oidc_rejects_partial_config(
@@ -282,10 +286,12 @@ def test_spawner_configuration_openshell_oidc_rejects_partial_config(
 
 
 def test_spawner_configuration_rejects_oidc_and_bearer_token_together() -> None:
-    """openshell_bearer_token and OIDC fields are mutually exclusive.
+    """openshell_bearer_token and OIDC fields (including audience) are mutually exclusive.
 
     Passing both is ambiguous about which auth mechanism should actually
-    be used -- reject it rather than silently picking one.
+    be used -- reject it rather than silently picking one. Includes
+    openshell_oidc_audience in the OIDC config to prove the mutex check
+    considers all four OIDC fields, not just the three required ones.
     """
     with pytest.raises(ValidationError, match="openshell_bearer_token"):
         SpawnerConfiguration(
@@ -295,6 +301,7 @@ def test_spawner_configuration_rejects_oidc_and_bearer_token_together() -> None:
             openshell_oidc_issuer="https://keycloak.example.com/realms/agents",
             openshell_oidc_client_id="my-client",
             openshell_oidc_client_secret="my-secret",
+            openshell_oidc_audience="my-audience",
         )
 
 

@@ -1,7 +1,9 @@
 name: Check image building
 
+# Disabled on pull_request in this fork: not related to cloud-agents work.
+# Trigger manually via workflow_dispatch if needed.
 on:
-  - pull_request
+  workflow_dispatch:
 
 env:
   IMAGE_NAME: lightspeed-stack

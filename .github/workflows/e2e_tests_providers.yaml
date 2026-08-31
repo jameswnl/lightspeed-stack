@@ -1,9 +1,10 @@
 # .github/workflows/e2e_tests.yml
 name: E2E Inference Provider Tests
 
-on: 
-  schedule:
-    - cron: "0 0 * * *"  # Runs once a day at midnight UTC
+# Scheduled run disabled in this fork: needs repository secrets (Azure,
+# GCP, watsonx, Bedrock credentials) that don't exist here, so the daily
+# cron would just fail. Trigger manually via workflow_dispatch if needed.
+on:
   workflow_dispatch:
 
 jobs:

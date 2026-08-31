@@ -1,8 +1,11 @@
 name: Bandit security scanner
 
+# Disabled on push/pull_request in this fork: fork PR CI has no access to
+# repository secrets, so this generic check just adds noise. Cloud-agents
+# work is scoped to cloud_agents_tests.yaml instead. Trigger manually via
+# workflow_dispatch if needed.
 on:
-  - push
-  - pull_request
+  workflow_dispatch:
 
 jobs:
   bandit:

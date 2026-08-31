@@ -1,9 +1,12 @@
 name: E2E Tests for Lightspeed Evaluation
 
+# Disabled on push/pull_request_target in this fork: needs OPENAI_API_KEY
+# and other repository secrets that fork PR CI doesn't get. Already
+# fork-gated via e2e_authorize.yaml, but disabling the auto-trigger avoids
+# spurious "authorize" job noise on every PR. Trigger manually via
+# workflow_dispatch if needed.
 on:
-  push:
-  pull_request_target:
-    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
 
 jobs:
   # Own job so repository secrets are never sent to a runner unless this passes.

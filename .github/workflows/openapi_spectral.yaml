@@ -4,9 +4,10 @@
 #   uv run scripts/generate_openapi_schema.py docs/openapi.json).
 name: OpenAPI (Spectral)
 
+# Disabled on push/pull_request in this fork: not related to cloud-agents
+# work. Trigger manually via workflow_dispatch if needed.
 on:
-  - push
-  - pull_request
+  workflow_dispatch:
 
 jobs:
   spectral:

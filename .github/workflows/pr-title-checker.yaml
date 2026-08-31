@@ -1,12 +1,9 @@
 name: "PR Title Checker"
+# Disabled in this fork: the JIRA-prefix title convention is for upstream
+# lightspeed-core/lightspeed-stack PRs, not this fork's harness-branch work.
+# Trigger manually via workflow_dispatch if needed.
 on:
-  pull_request_target:
-    types:
-      - opened
-      - edited
-      - synchronize
-      - labeled
-      - unlabeled
+  workflow_dispatch:
 jobs:
   check:
     runs-on: ubuntu-latest

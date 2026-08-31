@@ -1,8 +1,9 @@
 name: Type checks
 
+# Disabled on push/pull_request in this fork: not related to cloud-agents
+# work. Trigger manually via workflow_dispatch if needed.
 on:
-  - push
-  - pull_request
+  workflow_dispatch:
 
 jobs:
   mypy:

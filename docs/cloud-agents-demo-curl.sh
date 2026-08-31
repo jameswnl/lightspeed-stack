@@ -96,19 +96,34 @@ wait_for_status() {
   # spawn:ephemeral or spawn:local step should pass a higher budget (150,
   # matching the pytest e2e suite) -- sandbox boot + LLM latency routinely
   # exceeds 30s.
-  local wf_id="$1" wanted="$2" max="${3:-30}" status="" resp=""
+  #
+  # Sets WORKFLOW_STATUS (intentionally global) to the last-seen status so
+  # callers can require_status() it without a redundant GET.
+  local wf_id="$1" wanted="$2" max="${3:-30}" resp=""
+  WORKFLOW_STATUS=""
   for _ in $(seq 1 "$max"); do
     resp=$(curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id")
-    status=$(echo "$resp" | jq -r .status)
-    if [[ " $wanted " == *" $status "* ]]; then
+    WORKFLOW_STATUS=$(echo "$resp" | jq -r .status)
+    if [[ " $wanted " == *" $WORKFLOW_STATUS "* ]]; then
       echo "$resp" | jq
       return 0
     fi
     sleep 1
   done
-  echo "ERROR: workflow '$wf_id' never reached status in [$wanted] within ${max}s (last: $status)" >&2
+  echo "ERROR: workflow '$wf_id' never reached status in [$wanted] within ${max}s (last: $WORKFLOW_STATUS)" >&2
   echo "$resp" | jq
   return 1
+}
+
+require_status() {
+  # Fail with a clear error unless WORKFLOW_STATUS (set by the most recent
+  # wait_for_status call) equals the expected value. $2 is a verb phrase
+  # for the error message, e.g. "pause for approval" or "complete successfully".
+  local expected="$1" verb="$2"
+  if [[ "$WORKFLOW_STATUS" != "$expected" ]]; then
+    echo "ERROR: workflow did not $verb (status: $WORKFLOW_STATUS)" >&2
+    exit 1
+  fi
 }
 
 workflow_ephemeral_approval() {
@@ -165,11 +180,7 @@ workflow_ephemeral_approval() {
   echo
   echo "-- Waiting for status 'paused' at 'approve' --"
   wait_for_status "$wf_id" "paused failed cancelled completed" 150
-  status=$(curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id" | jq -r .status)
-  if [[ "$status" != "paused" ]]; then
-    echo "ERROR: workflow did not pause for approval (status: $status)" >&2
-    exit 1
-  fi
+  require_status "paused" "pause for approval"
 
   echo
   echo "-- Approving 'approve' step --"
@@ -181,6 +192,7 @@ workflow_ephemeral_approval() {
   echo
   echo "-- Waiting for a terminal status --"
   wait_for_status "$wf_id" "completed failed cancelled" 150
+  require_status "completed" "complete successfully"
 
   echo
   echo "-- Per-step transcripts --"
@@ -241,11 +253,7 @@ workflow_none_approval() {
   echo
   echo "-- Waiting for status 'paused' at 'approve' --"
   wait_for_status "$wf_id" "paused failed cancelled completed"
-  status=$(curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id" | jq -r .status)
-  if [[ "$status" != "paused" ]]; then
-    echo "ERROR: workflow did not pause for approval (status: $status)" >&2
-    exit 1
-  fi
+  require_status "paused" "pause for approval"
 
   echo
   echo "-- Approving 'approve' step --"
@@ -257,6 +265,7 @@ workflow_none_approval() {
   echo
   echo "-- Waiting for a terminal status --"
   wait_for_status "$wf_id" "completed failed cancelled"
+  require_status "completed" "complete successfully"
 
   echo
   echo "-- Per-step transcripts --"
@@ -299,6 +308,7 @@ workflow_local() {
   echo
   echo "-- Waiting for a terminal status --"
   wait_for_status "$wf_id" "completed failed cancelled" 150
+  require_status "completed" "complete successfully"
 
   echo
   echo "-- Per-step transcripts --"
@@ -341,6 +351,7 @@ workflow_ephemeral() {
   echo
   echo "-- Waiting for a terminal status --"
   wait_for_status "$wf_id" "completed failed cancelled" 150
+  require_status "completed" "complete successfully"
 
   echo
   echo "-- Per-step transcripts --"

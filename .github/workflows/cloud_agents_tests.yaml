@@ -35,9 +35,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: |
-          uv pip install --python ${{ matrix.python-version }} -e .
-          uv pip install -e "git+https://github.com/jameswnl/lightspeed-cloud-agents.git@main#egg=lightspeed-cloud-agents[local,kubernetes]"
+        # --frozen installs exactly what uv.lock pins (including the
+        # lightspeed-cloud-agents git commit) instead of letting `uv pip
+        # install -e .` re-resolve the floating `branch = "main"` source
+        # against whatever main currently is.
+        run: uv sync --frozen --python ${{ matrix.python-version }}
 
       - name: Run cloud-agents unit tests
         run: uv run pytest tests/unit/cloud_agents/ -v
@@ -73,9 +75,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: |
-          uv pip install --python 3.12 -e .
-          uv pip install -e "git+https://github.com/jameswnl/lightspeed-cloud-agents.git@main#egg=lightspeed-cloud-agents[local,kubernetes]"
+        # --frozen installs exactly what uv.lock pins (including the
+        # lightspeed-cloud-agents git commit) instead of letting `uv pip
+        # install -e .` re-resolve the floating `branch = "main"` source
+        # against whatever main currently is.
+        run: uv sync --frozen --python 3.12
 
       # spawn=none/local e2e over real HTTP, against an in-process mock LLM
       # (tests/e2e/cloud_agents/mock_llm_server.py) instead of real OpenAI --

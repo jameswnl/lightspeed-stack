@@ -1,8 +1,10 @@
 name: Build image, main branch push quay.io
 
+# Disabled on push in this fork: requires QUAY_REGISTRY_USERNAME/PASSWORD
+# secrets that don't exist here, and pushes to this fork's main aren't
+# meant to publish images. Trigger manually via workflow_dispatch if needed.
 on:
-  push:
-    branches: [ main ]
+  workflow_dispatch:
 
 env:
   IMAGE_NAME: lightspeed-stack

@@ -1,8 +1,15 @@
 name: Unit tests
 
+# Disabled on push/pull_request in this fork: this fork's harness branch is
+# scoped to cloud-agents integration work, and cloud_agents_tests.yaml
+# already covers the cloud-agents-specific unit/integration/e2e-mock subset
+# on every push/PR to harness. Auto-running the full upstream LCS unit-test
+# matrix (2 Python versions, the whole tests/unit tree) on every PR here
+# adds CI time without extra signal for this fork's scope. Trigger manually
+# via workflow_dispatch (e.g. to vet a dependency bump against the full
+# suite) -- `uv run make test-unit` locally is equivalent.
 on:
-  - push
-  - pull_request
+  workflow_dispatch:
 
 jobs:
   unit_tests:

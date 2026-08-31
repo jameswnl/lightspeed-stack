@@ -1,9 +1,10 @@
 # .github/workflows/e2e_tests_rhaiis.yaml
 name: RHAIIS E2E Tests
 
+# Scheduled run disabled in this fork: needs RHAIIS_URL/RHAIIS_API_KEY and
+# other repository secrets that don't exist here, so the daily cron would
+# just fail. Trigger manually via workflow_dispatch if needed.
 on:
-  schedule:
-    - cron: "0 0 * * *"  # Runs once a day at midnight UTC
   workflow_dispatch:
 
 

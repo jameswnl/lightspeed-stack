@@ -1,10 +1,10 @@
 """Real HTTP e2e tests for POST /v1/agents/run.
 
 Companion automated coverage for docs/cloud-agents-demo-curl.sh's
-agent-none/agent-ephemeral scenarios -- exercises an in-process and an
-ephemeral agent run through the actual FastAPI app over real HTTP (real
-routing, real auth dependency resolution, real request/response
-validation), unlike test_agents_run_handler_e2e.py
+agent-none/agent-local/agent-ephemeral scenarios -- exercises in-process,
+subprocess, and ephemeral agent runs through the actual FastAPI app over
+real HTTP (real routing, real auth dependency resolution, real
+request/response validation), unlike test_agents_run_handler_e2e.py
 (calls the handler function directly) or test_step_executor_e2e.py (calls
 the step-executor dispatch directly, bypassing the handler and HTTP both).
 
@@ -19,8 +19,9 @@ localhost:17670) and is marked `ephemeral` so CI can deselect it with
 `-m "not ephemeral"`.
 
 Set LIGHTSPEED_E2E_USE_MOCK_LLM=1 (see conftest.py) to run the spawn=none
-test here against an in-process mock LLM instead of real OpenAI -- this is
-what CI does. spawn=ephemeral still needs a real key and gateway either way.
+and spawn=local tests here against an in-process mock LLM instead of real
+OpenAI -- this is what CI does. spawn=ephemeral still needs a real key and
+gateway either way.
 
 Usage:
     cd ~/ws/local-infra && make up   # provides Postgres on localhost:5432
@@ -52,7 +53,10 @@ pytestmark = [
 
 
 class TestAgentRunHttpE2E:
-    """POST /v1/agents/run over real HTTP (mirrors demo-curl agent-none/agent-ephemeral)."""
+    """POST /v1/agents/run over real HTTP.
+
+    Mirrors demo-curl agent-none/agent-local/agent-ephemeral.
+    """
 
     def test_in_process_agent_run(self, http_client: TestClient) -> None:
         """spawn:none agent run returns a structured, schema-conforming response."""
@@ -82,6 +86,35 @@ class TestAgentRunHttpE2E:
         assert isinstance(data["output"], dict)
         assert "healthy" in data["output"]
         assert "reason" in data["output"]
+        assert data["token_usage"]["input_tokens"] > 0
+
+    def test_local_spawn_agent_run(self, http_client: TestClient) -> None:
+        """spawn:local agent run executes in a subprocess and returns a completed result.
+
+        No output_schema here (unlike test_in_process_agent_run): the
+        cloud-agents SubprocessExecutor has no native structured-output
+        mode yet (jameswnl/lightspeed-cloud-agents#235) -- it only embeds
+        the schema as prompt text, which the deterministic mock LLM used
+        here doesn't recognize. Matches the existing spawn:local workflow
+        step test's approach (test_workflow_with_local_spawn_step), which
+        also avoids output_schema for the same reason.
+        """
+        response = http_client.post(
+            "/v1/agents/run",
+            json={
+                "prompt": "Say one sentence confirming pod checkout-7f9 is healthy.",
+                "spawn": "local",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "tools": [],
+                "mcp_servers": None,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["output"] is not None
         assert data["token_usage"]["input_tokens"] > 0
 
     @pytest.mark.ephemeral

@@ -6,18 +6,26 @@
 #
 # agent-none / agent-ephemeral / workflow-ephemeral-approval illustrate
 # the three tabs in docs/cloud-agents-integration.html. The rest
-# (workflow-none-approval, workflow-local, workflow-ephemeral) round out
-# the same matrix for parity with the automated e2e suite -- they aren't
-# part of that illustration, just additional scenarios:
+# (agent-local, workflow-none-approval, workflow-local, workflow-ephemeral)
+# round out the same matrix for parity with the automated e2e suite --
+# they aren't part of that illustration, just additional scenarios:
 #   agent-none                 POST /v1/agents/run,    spawn: "none"
+#   agent-local                 POST /v1/agents/run,    spawn: "local"
 #   agent-ephemeral             POST /v1/agents/run,    spawn: "ephemeral"
 #   workflow-ephemeral-approval POST /v1/workflows/run, spawn: "ephemeral", multi-step + approval
 #   workflow-none-approval      POST /v1/workflows/run, spawn: "none",      multi-step + approval
 #   workflow-local               POST /v1/workflows/run, spawn: "local",     single step
 #   workflow-ephemeral           POST /v1/workflows/run, spawn: "ephemeral", single step, no approval
 #
+# Note: agent-local and workflow-local omit output_schema -- the
+# cloud-agents SubprocessExecutor behind spawn:local has no native
+# structured-output mode yet (jameswnl/lightspeed-cloud-agents#235), so
+# it can't reliably guarantee schema-conforming JSON the way spawn:none
+# and spawn:ephemeral can.
+#
 # Usage:
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-none
+#   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-local
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-ephemeral
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh workflow-ephemeral-approval
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh workflow-none-approval
@@ -63,6 +71,25 @@ agent_none() {
         "properties": { "healthy": {"type": "boolean"}, "reason": {"type": "string"} },
         "required": ["healthy", "reason"]
       }
+    }')
+  status="${resp##*$'\n'}"
+  echo "${resp%$'\n'*}" | jq
+  [[ "$status" -lt 400 ]]
+}
+
+agent_local() {
+  echo "== Agent — Subprocess (spawn: local) =="
+  local resp status
+  resp=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/v1/agents/run" \
+    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "prompt": "Say one sentence confirming pod checkout-7f9 is healthy.",
+      "spawn": "local",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "tools": [],
+      "mcp_servers": null
     }')
   status="${resp##*$'\n'}"
   echo "${resp%$'\n'*}" | jq
@@ -361,13 +388,14 @@ workflow_ephemeral() {
 case "${1:-}" in
   discover) discover ;;
   agent-none) agent_none ;;
+  agent-local) agent_local ;;
   agent-ephemeral) agent_ephemeral ;;
   workflow-ephemeral-approval) workflow_ephemeral_approval ;;
   workflow-none-approval) workflow_none_approval ;;
   workflow-local) workflow_local ;;
   workflow-ephemeral) workflow_ephemeral ;;
   *)
-    echo "Usage: $0 {discover|agent-none|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral}" >&2
+    echo "Usage: $0 {discover|agent-none|agent-local|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral}" >&2
     exit 1
     ;;
 esac

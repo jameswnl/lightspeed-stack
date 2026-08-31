@@ -45,9 +45,10 @@ class AgentRunRequest(BaseModel):
         "Falls back to inference.default_provider.",
     )
 
-    spawn: Literal["none", "ephemeral"] = Field(
+    spawn: Literal["none", "local", "ephemeral"] = Field(
         "none",
-        description="'none' runs in-process; 'ephemeral' spawns a container.",
+        description="'none' runs in-process; 'local' spawns a subprocess; "
+        "'ephemeral' spawns a container.",
     )
 
     sandbox_image: Optional[str] = Field(

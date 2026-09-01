@@ -3,8 +3,8 @@
 Calls `run_agent_handler.__wrapped__(...)` directly, bypassing the
 `@authorize` decorator and FastAPI routing/request-validation entirely --
 see test_agents_run_http_e2e.py for the real-HTTP equivalent of this
-file's spawn=none/ephemeral coverage, and test_step_executor_e2e.py for
-coverage one layer further down (the step-executor dispatch itself,
+file's spawn=none/local/ephemeral coverage, and test_step_executor_e2e.py
+for coverage one layer further down (the step-executor dispatch itself,
 bypassing this handler too).
 
 Runs against a real LLM backend (OpenAI via pydantic-ai). Requires
@@ -252,6 +252,31 @@ class TestAgentRunE2E:
         """
         with pytest.raises(ValidationError):
             AgentRunRequest(provider="openai", model="gpt-4o-mini")  # type: ignore[call-arg]
+
+
+class TestAgentRunLocalSpawnE2E:
+    """POST /v1/agents/run with spawn=local, through the real handler.
+
+    No output_schema here: the cloud-agents SubprocessExecutor behind
+    spawn=local has no native structured-output mode yet
+    (jameswnl/lightspeed-cloud-agents#235).
+    """
+
+    @pytest.mark.asyncio
+    async def test_local_spawn_executes_in_subprocess(self, e2e_config: Any) -> None:
+        """spawn=local runs in a child process and returns real LLM output."""
+        body = AgentRunRequest(
+            prompt="What is 9+9? Reply with just the number.",
+            provider="openai",
+            model="gpt-4o-mini",
+            spawn="local",
+        )
+
+        result = await run_agent_handler.__wrapped__(make_request(), body, AUTH)
+
+        assert result["status"] == "completed"
+        assert "18" in str(result["output"])
+        assert result["transcript"]
 
 
 @pytest.mark.ephemeral

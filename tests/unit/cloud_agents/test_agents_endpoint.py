@@ -419,3 +419,53 @@ class TestRunAgentHandler:
         assert call_args.provider["name"] == "anthropic"
         assert call_args.provider["model"] == "claude-sonnet-5"
         assert call_args.provider["credentials_secret"] == "ANTHROPIC_API_KEY"
+
+    @pytest.mark.asyncio
+    async def test_local_spawn_dispatches_without_spawner(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """spawn=local dispatches via get_step_executor with no spawner.
+
+        Mirrors spawn=none: SubprocessExecutor inherits the host process's
+        env directly, so no spawner/credentials_secret plumbing is needed.
+        """
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        mock_build_spawner = mocker.patch("app.endpoints.agents.build_spawner")
+        mock_get_step_executor = mocker.patch(
+            "app.endpoints.agents.get_step_executor", return_value=mock_executor
+        )
+
+        body = AgentRunRequest(prompt="Fix the issue", spawn="local")
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await run_agent_handler.__wrapped__(request, body, auth)
+
+        mock_build_spawner.assert_not_called()
+        _, kwargs = mock_get_step_executor.call_args
+        assert kwargs["spawner"] is None
+        assert mock_get_step_executor.call_args[0][0]["spawn"] == "local"
+        call_args = mock_executor.run.call_args[0][0]
+        assert "credentials_secret" not in call_args.provider
+
+    @pytest.mark.asyncio
+    async def test_local_spawn_result_shape(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """spawn=local returns the same result shape as spawn=none."""
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+
+        body = AgentRunRequest(prompt="Fix the issue", spawn="local")
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        result = await run_agent_handler.__wrapped__(request, body, auth)
+
+        assert result["status"] == "completed"
+        assert result["output"] == {"summary": "Done"}

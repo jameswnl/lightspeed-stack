@@ -12617,10 +12617,11 @@
                         "type": "string",
                         "enum": [
                             "none",
+                            "local",
                             "ephemeral"
                         ],
                         "title": "Spawn",
-                        "description": "'none' runs in-process; 'ephemeral' spawns a container.",
+                        "description": "'none' runs in-process; 'local' spawns a subprocess; 'ephemeral' spawns a container.",
                         "default": "none"
                     },
                     "sandbox_image": {

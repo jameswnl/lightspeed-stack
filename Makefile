@@ -243,7 +243,7 @@ demo-agents-workflows-server: ## Start lightspeed-stack ready for the cloud-agen
 	OPENSHELL_GATEWAY_URL="$${OPENSHELL_GATEWAY_URL:-localhost:17670}" \
 		uv run python src/lightspeed_stack.py -c lightspeed-stack-harness.yaml
 
-demo-agents-workflows: ## Curl-based live demo against a running server (make demo-agents-workflows SCENARIO=agent-none|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral|discover)
+demo-agents-workflows: ## Curl-based live demo against a running server (make demo-agents-workflows SCENARIO=agent-none|agent-local|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral|discover)
 	@if ! curl -s -o /dev/null --max-time 2 "$${BASE_URL:-http://localhost:8090}/v1/info" 2>/dev/null; then \
 		echo "ERROR: no server reachable at $${BASE_URL:-http://localhost:8090}."; \
 		echo "Start one with: uv run make demo-agents-workflows-server"; \
@@ -258,7 +258,7 @@ demo-agents-workflows-all: ## Run every demo scenario against a running server (
 		exit 1; \
 	fi
 	@failed=""; \
-	for scenario in agent-none agent-ephemeral workflow-ephemeral-approval workflow-none-approval workflow-local workflow-ephemeral; do \
+	for scenario in agent-none agent-local agent-ephemeral workflow-ephemeral-approval workflow-none-approval workflow-local workflow-ephemeral; do \
 		echo; \
 		echo "########## $$scenario ##########"; \
 		if ! ./docs/cloud-agents-demo-curl.sh "$$scenario"; then \

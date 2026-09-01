@@ -311,7 +311,7 @@ mcp_servers:
 | MCP servers | Yes | Yes | Yes | Done |
 | Skills | Yes | Yes | Yes (OCI) | Done |
 | Streaming | Yes | fallback | n/a | Done |
-| Output schemas | Yes | Yes | Yes | Done |
+| Output schemas | Yes | Partial* | Yes | Done |
 | Step chaining | Yes | Yes | Yes | Done |
 | Human approval | Yes | Yes | Yes | Done |
 | OTEL tracing | Yes | Yes | Yes | Done |
@@ -320,6 +320,11 @@ mcp_servers:
 | Shields / guardrails | - | - | - | **Gap** |
 | Quota enforcement | - | - | - | **Gap** |
 | Conversation history | basic | - | - | **Partial** |
+
+\* spawn:local's `SubprocessExecutor` only embeds `output_schema` as prompt
+text (no native structured-output request mode), unlike spawn:none/ephemeral.
+Usually fine against real models, but not guaranteed the way the other two
+modes are (jameswnl/lightspeed-cloud-agents#235).
 
 ### Workflow Execution E2E Verified
 

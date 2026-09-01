@@ -447,6 +447,7 @@ class TestRunAgentHandler:
         mock_build_spawner.assert_not_called()
         _, kwargs = mock_get_step_executor.call_args
         assert kwargs["spawner"] is None
+        assert mock_get_step_executor.call_args[0][0]["spawn"] == "local"
         call_args = mock_executor.run.call_args[0][0]
         assert "credentials_secret" not in call_args.provider
 

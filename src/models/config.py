@@ -3171,6 +3171,10 @@ class SpawnerConfiguration(ConfigurationBase):
         openshell_tls_cert: Client cert path for mTLS to the OpenShell gateway.
         openshell_tls_key: Client key path for mTLS to the OpenShell gateway.
         openshell_bearer_token: Bearer token for OIDC auth to the OpenShell gateway.
+        openshell_oidc_issuer: OIDC issuer URL for client-credentials auth.
+        openshell_oidc_client_id: OIDC client ID for client-credentials auth.
+        openshell_oidc_client_secret: OIDC client secret for client-credentials auth.
+        openshell_oidc_audience: Optional OIDC audience for client-credentials auth.
     """
 
     type: Literal["openshell"] = Field(
@@ -3232,8 +3236,89 @@ class SpawnerConfiguration(ConfigurationBase):
     openshell_bearer_token: Optional[SecretStr] = Field(
         None,
         title="OpenShell bearer token",
-        description="Bearer token for OIDC auth to the OpenShell gateway.",
+        description="Bearer token for OIDC auth to the OpenShell gateway. "
+        "Mutually exclusive with the openshell_oidc_* fields below -- a "
+        "static token is minted once by the caller and never refreshed, "
+        "whereas the openshell_oidc_* fields let lightspeed-stack mint and "
+        "refresh tokens itself via the OIDC client-credentials grant.",
     )
+
+    openshell_oidc_issuer: Optional[str] = Field(
+        None,
+        title="OpenShell OIDC issuer",
+        description="OIDC issuer base URL for client-credentials auth to the "
+        "OpenShell gateway, e.g. 'https://keycloak.example.com/realms/agents'. "
+        "Token endpoint is derived as '{issuer}/protocol/openid-connect/token'. "
+        "Requires openshell_oidc_client_id and openshell_oidc_client_secret.",
+    )
+
+    openshell_oidc_client_id: Optional[str] = Field(
+        None,
+        title="OpenShell OIDC client ID",
+        description="OIDC client ID for client-credentials auth to the "
+        "OpenShell gateway. Requires openshell_oidc_issuer and "
+        "openshell_oidc_client_secret.",
+    )
+
+    openshell_oidc_client_secret: Optional[SecretStr] = Field(
+        None,
+        title="OpenShell OIDC client secret",
+        description="OIDC client secret for client-credentials auth to the "
+        "OpenShell gateway. Requires openshell_oidc_issuer and "
+        "openshell_oidc_client_id.",
+    )
+
+    openshell_oidc_audience: Optional[str] = Field(
+        None,
+        title="OpenShell OIDC audience",
+        description="Optional OIDC audience for client-credentials auth to "
+        "the OpenShell gateway. Only meaningful alongside "
+        "openshell_oidc_issuer/client_id/client_secret.",
+    )
+
+    @model_validator(mode="after")
+    def check_oidc_configuration(self) -> Self:
+        """Validate OIDC client-credentials fields are all-or-nothing.
+
+        A partially-configured OIDC block would silently fall back to the
+        static bearer_token path (or no auth at all) instead of failing
+        loudly at startup -- reject it outright. Also rejects combining
+        openshell_bearer_token with any OIDC field, since it's ambiguous
+        which auth mechanism should actually be used.
+
+        Returns:
+            Self: The validated configuration instance.
+
+        Raises:
+            ValueError: If OIDC fields are partially set, or combined with
+                openshell_bearer_token.
+        """
+        required_oidc_fields = {
+            "openshell_oidc_issuer": self.openshell_oidc_issuer,
+            "openshell_oidc_client_id": self.openshell_oidc_client_id,
+            "openshell_oidc_client_secret": self.openshell_oidc_client_secret,
+        }
+        all_oidc_fields = {
+            **required_oidc_fields,
+            "openshell_oidc_audience": self.openshell_oidc_audience,
+        }
+        any_oidc_field_set = any(value for value in all_oidc_fields.values())
+        set_required_fields = [
+            name for name, value in required_oidc_fields.items() if value
+        ]
+        if any_oidc_field_set and len(set_required_fields) != len(required_oidc_fields):
+            missing = sorted(set(required_oidc_fields) - set(set_required_fields))
+            raise ValueError(
+                "openshell_oidc_issuer, openshell_oidc_client_id, and "
+                "openshell_oidc_client_secret must all be set together "
+                f"for OIDC client-credentials auth; missing: {missing}"
+            )
+        if any_oidc_field_set and self.openshell_bearer_token:
+            raise ValueError(
+                "openshell_bearer_token and the openshell_oidc_* fields are "
+                "mutually exclusive -- set one or the other, not both."
+            )
+        return self
 
 
 class Configuration(ConfigurationBase):

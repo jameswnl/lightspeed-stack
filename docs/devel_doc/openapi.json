@@ -6239,6 +6239,90 @@
                 }
             }
         },
+        "/v1/query/direct": {
+            "post": {
+                "tags": [
+                    "query"
+                ],
+                "summary": "Query Direct Handler",
+                "description": "Execute a query via DirectExecutor (no Llama Stack).\n\nParameters:\n    request: FastAPI request (consumed by @authorize decorator).\n    body: Query parameters (field names match /query).\n    auth: Authentication tuple (consumed by @authorize decorator).\n\nReturns:\n    Response matching QueryResponse field names.",
+                "operationId": "query_direct_handler_v1_query_direct_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/QueryDirectRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": true,
+                                    "type": "object",
+                                    "title": "Response Query Direct Handler V1 Query Direct Post"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/query/direct/stream": {
+            "post": {
+                "tags": [
+                    "query"
+                ],
+                "summary": "Query Direct Stream Handler",
+                "description": "Stream a query via DirectExecutor as SSE events.\n\nToken-by-token streaming is active when tools or MCP servers\nare configured. Without tools, yields a single complete event.\n\nParameters:\n    request: FastAPI request (consumed by @authorize decorator).\n    body: Query parameters (field names match /query).\n    auth: Authentication tuple (consumed by @authorize decorator).\n\nReturns:\n    StreamingResponse with SSE events.",
+                "operationId": "query_direct_stream_handler_v1_query_direct_stream_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/QueryDirectRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/v1/streaming_query": {
             "post": {
                 "tags": [
@@ -11467,6 +11551,321 @@
                 }
             }
         },
+        "/v1/agent-tools": {
+            "get": {
+                "tags": [
+                    "tools"
+                ],
+                "summary": "List Agent Tools Handler",
+                "description": "List registered agent tools available for spawn:none/local steps.\n\nThese are Python functions registered via cloud-agents' @step_tool\ndecorator. Different from MCP tools (which are remote servers).\n\nParameters:\n    request: FastAPI request (consumed by @authorize decorator).\n    auth: Authentication tuple (consumed by @authorize decorator).\n\nReturns:\n    List of tool names and descriptions.",
+                "operationId": "list_agent_tools_handler_v1_agent_tools_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": true,
+                                    "type": "object",
+                                    "title": "Response List Agent Tools Handler V1 Agent Tools Get"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/agents/run": {
+            "post": {
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Run Agent Handler",
+                "description": "Execute a single agent with inline parameters.\n\nParameters:\n    request: FastAPI request (used by middleware).\n    body: Agent execution parameters.\n    auth: Authentication tuple (used by middleware).\n\nReturns:\n    Agent execution result with status, output, and transcript.",
+                "operationId": "run_agent_handler_v1_agents_run_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AgentRunRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Agent execution result.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": true,
+                                    "type": "object",
+                                    "title": "Response Run Agent Handler V1 Agents Run Post"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized."
+                    },
+                    "403": {
+                        "description": "Forbidden."
+                    },
+                    "500": {
+                        "description": "Internal server error."
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/workflows/run": {
+            "post": {
+                "tags": [
+                    "workflows"
+                ],
+                "summary": "Start Workflow Handler",
+                "description": "Start a new workflow execution.\n\nParameters:\n    request: FastAPI request (used by middleware).\n    body: Workflow definition and configuration.\n    auth: Authentication tuple (used by middleware).\n\nReturns:\n    Workflow ID and initial status.",
+                "operationId": "start_workflow_handler_v1_workflows_run_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RunWorkflowRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "202": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": true,
+                                    "type": "object",
+                                    "title": "Response Start Workflow Handler V1 Workflows Run Post"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/workflows/{workflow_id}": {
+            "get": {
+                "tags": [
+                    "workflows"
+                ],
+                "summary": "Get Workflow Handler",
+                "description": "Get the current status of a workflow execution.\n\nParameters:\n    request: FastAPI request (used by middleware).\n    workflow_id: Target workflow execution ID.\n    auth: Authentication tuple (used by middleware).\n\nReturns:\n    Workflow status including step results and events.",
+                "operationId": "get_workflow_handler_v1_workflows__workflow_id__get",
+                "parameters": [
+                    {
+                        "name": "workflow_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Workflow Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true,
+                                    "title": "Response Get Workflow Handler V1 Workflows  Workflow Id  Get"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/workflows/{workflow_id}/approve": {
+            "post": {
+                "tags": [
+                    "workflows"
+                ],
+                "summary": "Approve Workflow Handler",
+                "description": "Send an approval signal to a paused workflow.\n\nParameters:\n    request: FastAPI request (used by middleware).\n    workflow_id: Target workflow execution ID.\n    body: Approval decision.\n    auth: Authentication tuple (used by middleware).\n\nReturns:\n    Acknowledgement message.",
+                "operationId": "approve_workflow_handler_v1_workflows__workflow_id__approve_post",
+                "parameters": [
+                    {
+                        "name": "workflow_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Workflow Id"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ApproveWorkflowRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "title": "Response Approve Workflow Handler V1 Workflows  Workflow Id  Approve Post"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/workflows/{workflow_id}/cancel": {
+            "post": {
+                "tags": [
+                    "workflows"
+                ],
+                "summary": "Cancel Workflow Handler",
+                "description": "Cancel a running workflow.\n\nParameters:\n    request: FastAPI request (used by middleware).\n    workflow_id: Target workflow execution ID.\n    auth: Authentication tuple (used by middleware).\n\nReturns:\n    Acknowledgement message.",
+                "operationId": "cancel_workflow_handler_v1_workflows__workflow_id__cancel_post",
+                "parameters": [
+                    {
+                        "name": "workflow_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Workflow Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "title": "Response Cancel Workflow Handler V1 Workflows  Workflow Id  Cancel Post"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/workflows/{workflow_id}/transcripts": {
+            "get": {
+                "tags": [
+                    "workflows"
+                ],
+                "summary": "Get Transcripts Handler",
+                "description": "Get step transcripts for a workflow.\n\nParameters:\n    request: FastAPI request (used by middleware).\n    workflow_id: Target workflow execution ID.\n    auth: Authentication tuple (used by middleware).\n\nReturns:\n    Transcripts keyed by step name.",
+                "operationId": "get_transcripts_handler_v1_workflows__workflow_id__transcripts_get",
+                "parameters": [
+                    {
+                        "name": "workflow_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Workflow Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true,
+                                    "title": "Response Get Transcripts Handler V1 Workflows  Workflow Id  Transcripts Get"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/.well-known/agent-card.json": {
             "get": {
                 "tags": [
@@ -11764,7 +12163,12 @@
                     "manage_files",
                     "manage_prompts",
                     "read_prompts",
-                    "manage_saved_prompts"
+                    "manage_saved_prompts",
+                    "agent_run",
+                    "workflow_start",
+                    "workflow_view",
+                    "workflow_approve",
+                    "workflow_cancel"
                 ],
                 "title": "Action",
                 "description": "Available actions in the system.\n\nNote: this is not a real model, just an enumeration of all action names."
@@ -12166,6 +12570,129 @@
                 "title": "AgentProvider",
                 "description": "Represents the service provider of an agent."
             },
+            "AgentRunRequest": {
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "title": "Prompt",
+                        "description": "The task prompt for the agent."
+                    },
+                    "instructions": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Instructions",
+                        "description": "System prompt / instructions for the agent."
+                    },
+                    "model": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Model",
+                        "description": "Full model ID (e.g. 'openai/gpt-4o'). Falls back to inference.default_model."
+                    },
+                    "provider": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Provider",
+                        "description": "Provider name. Used to prefix model if no slash present. Falls back to inference.default_provider."
+                    },
+                    "spawn": {
+                        "type": "string",
+                        "enum": [
+                            "none",
+                            "ephemeral"
+                        ],
+                        "title": "Spawn",
+                        "description": "'none' runs in-process; 'ephemeral' spawns a container.",
+                        "default": "none"
+                    },
+                    "sandbox_image": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Sandbox Image",
+                        "description": "Container image for spawn=ephemeral."
+                    },
+                    "tools": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "title": "Tools",
+                        "description": "Registered tool names for the agent to use."
+                    },
+                    "mcp_servers": {
+                        "anyOf": [
+                            {
+                                "items": {
+                                    "additionalProperties": true,
+                                    "type": "object"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Mcp Servers",
+                        "description": "MCP server configs: [{name, url, headers}]. Each server is connected via pydantic-ai MCPToolset."
+                    },
+                    "output_schema": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Output Schema",
+                        "description": "JSON Schema for structured output."
+                    },
+                    "context": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Context",
+                        "description": "Prior context from previous steps or calls."
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "prompt"
+                ],
+                "title": "AgentRunRequest",
+                "description": "Request body for POST /v1/agents/run.\n\nAll agent parameters are passed inline \u2014 no registry lookup.\n\nAttributes:\n    prompt: The task prompt for the agent.\n    instructions: System prompt / instructions.\n    model: Full model ID (e.g. \"openai/gpt-4o\").\n    provider: Provider name (used with model if no slash in model).\n    spawn: Execution mode.\n    sandbox_image: Container image for spawn=ephemeral.\n    tools: Tool definitions.\n    mcp_servers: MCP server names.\n    output_schema: JSON Schema for structured output.\n    context: Prior context (e.g. from previous steps)."
+            },
             "AgentSkill": {
                 "properties": {
                     "description": {
@@ -12382,6 +12909,37 @@
                 "type": "object",
                 "title": "ApprovalsConfiguration",
                 "description": "Configuration for human-in-the-loop approvals.\n\nAttributes:\n    approval_timeout_seconds: How long approval requests remain pending\n        before expiring.\n    approval_retention_days: How long to retain decided approvals for audit\n        purposes before cleanup."
+            },
+            "ApproveWorkflowRequest": {
+                "properties": {
+                    "step_name": {
+                        "type": "string",
+                        "title": "Step Name",
+                        "description": "Name of the approval step to approve."
+                    },
+                    "decision": {
+                        "type": "string",
+                        "enum": [
+                            "approved",
+                            "rejected"
+                        ],
+                        "title": "Decision",
+                        "description": "Approval decision."
+                    },
+                    "approver": {
+                        "type": "string",
+                        "title": "Approver",
+                        "description": "Identity of the approver.",
+                        "default": ""
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "step_name",
+                    "decision"
+                ],
+                "title": "ApproveWorkflowRequest",
+                "description": "Request body for POST /v1/workflows/{id}/approve.\n\nAttributes:\n    step_name: Name of the approval step.\n    decision: Approval decision.\n    approver: Identity of the approver."
             },
             "Attachment": {
                 "properties": {
@@ -13246,6 +13804,23 @@
                         "type": "array",
                         "title": "Shields configuration",
                         "description": "List of pydantic-ai-lightspeed agent guardrail shields (question validity and PII redaction). Each entry has a unique 'name', a 'provider_id' ('question_validity' or 'redaction'), and a type-specific 'config'."
+                    },
+                    "workflow_engine": {
+                        "$ref": "#/components/schemas/WorkflowEngineConfiguration",
+                        "title": "Workflow engine configuration",
+                        "description": "Configuration for multi-step workflow orchestration."
+                    },
+                    "spawner": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/SpawnerConfiguration"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Spawner configuration",
+                        "description": "Ephemeral agent spawner for sandbox container execution. Required when any agent uses spawn=ephemeral."
                     }
                 },
                 "additionalProperties": false,
@@ -18491,6 +19066,100 @@
                     }
                 ]
             },
+            "QueryDirectRequest": {
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "title": "Query",
+                        "description": "The query string",
+                        "examples": [
+                            "What is Kubernetes?"
+                        ]
+                    },
+                    "conversation_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Conversation Id",
+                        "description": "Conversation ID for multi-turn (requires PostgreSQL transcript store)"
+                    },
+                    "provider": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Provider",
+                        "description": "The optional provider"
+                    },
+                    "model": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Model",
+                        "description": "The optional model"
+                    },
+                    "system_prompt": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "System Prompt",
+                        "description": "The optional system prompt"
+                    },
+                    "mcp_servers": {
+                        "anyOf": [
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Mcp Servers",
+                        "description": "MCP server names from config (None = all configured)"
+                    },
+                    "output_schema": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Output Schema",
+                        "description": "JSON Schema for structured output"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "query"
+                ],
+                "title": "QueryDirectRequest",
+                "description": "Request body for POST /v1/query/direct.\n\nField names match QueryRequest for API compatibility.\n\nAttributes:\n    query: The query string.\n    conversation_id: Optional conversation ID for multi-turn.\n    provider: Optional provider name.\n    model: Optional model name.\n    system_prompt: Optional system prompt.\n    mcp_servers: Optional MCP server names from config.\n    output_schema: Optional JSON Schema for structured output."
+            },
             "QueryRequest": {
                 "properties": {
                     "query": {
@@ -21016,6 +21685,72 @@
                 "title": "RlsapiV1Terminal",
                 "description": "Terminal output from rlsapi v1 context.\n\nAttributes:\n    output: The textual contents of the terminal read on the client machine."
             },
+            "RunWorkflowRequest": {
+                "properties": {
+                    "definition": {
+                        "additionalProperties": true,
+                        "type": "object",
+                        "title": "Definition",
+                        "description": "Workflow definition with apiVersion, kind, metadata, spec."
+                    },
+                    "provider": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Provider",
+                        "description": "Default provider config: {name, model, credentials_secret}."
+                    },
+                    "sandbox_image": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Sandbox Image",
+                        "description": "Default sandbox image for ephemeral steps."
+                    },
+                    "approval_policy": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Approval Policy",
+                        "description": "Approval policy for human-approval steps."
+                    },
+                    "session_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Session Id",
+                        "description": "Caller-provided ID grouping related workflow runs."
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "definition"
+                ],
+                "title": "RunWorkflowRequest",
+                "description": "Request body for POST /v1/workflows/run.\n\nAttributes:\n    definition: Workflow definition (same schema as cloud-agents YAML).\n    provider: Default LLM provider config for all steps.\n    sandbox_image: Default sandbox image for ephemeral steps.\n    approval_policy: Optional approval policy.\n    session_id: Optional caller-provided ID grouping related workflow runs."
+            },
             "SQLiteDatabaseConfiguration": {
                 "properties": {
                     "db_path": {
@@ -21707,6 +22442,163 @@
                 "type": "object",
                 "title": "SolrVectorSearchRequest",
                 "description": "LCORE Solr inline RAG options for vector_io.query (mode and provider filters).\n\nAttributes:\n    mode: Solr vector_io search mode. When omitted, the configured OKP default is used.\n    filters: Solr provider filter payload passed through as params['solr'].\n\nLegacy clients may send a plain JSON object with filter keys only;\nthat object is accepted as filters with mode unset (server default applies)."
+            },
+            "SpawnerConfiguration": {
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "const": "openshell",
+                        "title": "Spawner type",
+                        "description": "Backend for spawning ephemeral agent containers. OpenShellSpawner is the only supported backend."
+                    },
+                    "sandbox_image": {
+                        "type": "string",
+                        "title": "Default sandbox image",
+                        "description": "Default container image for sandbox pods.",
+                        "default": "lightspeed-agentic-sandbox:latest"
+                    },
+                    "max_pods": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0.0,
+                        "title": "Max concurrent pods",
+                        "description": "Maximum number of concurrent sandbox pods.",
+                        "default": 10
+                    },
+                    "openshell_gateway_url": {
+                        "type": "string",
+                        "title": "OpenShell gateway URL",
+                        "description": "OpenShell gateway gRPC endpoint, e.g. 'localhost:9080'."
+                    },
+                    "openshell_workspace": {
+                        "type": "string",
+                        "title": "OpenShell workspace",
+                        "description": "OpenShell workspace name.",
+                        "default": "default"
+                    },
+                    "openshell_http_endpoint": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "OpenShell HTTP endpoint",
+                        "description": "Override HTTP proxy endpoint for the OpenShell gateway, when gRPC and HTTP are split across different addresses."
+                    },
+                    "openshell_tls_ca": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "format": "file-path"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "OpenShell gateway CA cert",
+                        "description": "CA certificate path for the OpenShell gateway connection."
+                    },
+                    "openshell_tls_cert": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "format": "file-path"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "OpenShell client cert",
+                        "description": "Client certificate path for mTLS to the OpenShell gateway."
+                    },
+                    "openshell_tls_key": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "format": "file-path"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "OpenShell client key",
+                        "description": "Client key path for mTLS to the OpenShell gateway."
+                    },
+                    "openshell_bearer_token": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "format": "password",
+                                "writeOnly": true
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "OpenShell bearer token",
+                        "description": "Bearer token for OIDC auth to the OpenShell gateway. Mutually exclusive with the openshell_oidc_* fields below -- a static token is minted once by the caller and never refreshed, whereas the openshell_oidc_* fields let lightspeed-stack mint and refresh tokens itself via the OIDC client-credentials grant."
+                    },
+                    "openshell_oidc_issuer": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "OpenShell OIDC issuer",
+                        "description": "OIDC issuer base URL for client-credentials auth to the OpenShell gateway, e.g. 'https://keycloak.example.com/realms/agents'. Token endpoint is derived as '{issuer}/protocol/openid-connect/token'. Requires openshell_oidc_client_id and openshell_oidc_client_secret."
+                    },
+                    "openshell_oidc_client_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "OpenShell OIDC client ID",
+                        "description": "OIDC client ID for client-credentials auth to the OpenShell gateway. Requires openshell_oidc_issuer and openshell_oidc_client_secret."
+                    },
+                    "openshell_oidc_client_secret": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "format": "password",
+                                "writeOnly": true
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "OpenShell OIDC client secret",
+                        "description": "OIDC client secret for client-credentials auth to the OpenShell gateway. Requires openshell_oidc_issuer and openshell_oidc_client_id."
+                    },
+                    "openshell_oidc_audience": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "OpenShell OIDC audience",
+                        "description": "Optional OIDC audience for client-credentials auth to the OpenShell gateway. Only meaningful alongside openshell_oidc_issuer/client_id/client_secret."
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "type",
+                    "openshell_gateway_url"
+                ],
+                "title": "SpawnerConfiguration",
+                "description": "Ephemeral agent spawner configuration.\n\nspawn: \"ephemeral\" uses OpenShellSpawner exclusively -- no other spawner\nbackend is supported, so `type` only accepts \"openshell\". The compute\ndriver the OpenShell gateway itself uses to spawn sandboxes (kubernetes\nvs. podman) is entirely the gateway's own concern -- OpenShellSpawner's\nwhole lifecycle (create/exec/expose/query/destroy) is proxied through the\ngateway's own network address, so lightspeed-stack never needs to know or\nconfigure it. There is deliberately no `driver`-style field here.\n\nAttributes:\n    type: Spawner backend type (openshell only).\n    sandbox_image: Default container image for sandbox pods.\n    max_pods: Maximum concurrent sandbox pods.\n    openshell_gateway_url: OpenShell gateway gRPC endpoint.\n    openshell_workspace: OpenShell workspace name.\n    openshell_http_endpoint: Override HTTP proxy endpoint, when split\n        from the gRPC endpoint.\n    openshell_tls_ca: CA cert path for the OpenShell gateway connection.\n    openshell_tls_cert: Client cert path for mTLS to the OpenShell gateway.\n    openshell_tls_key: Client key path for mTLS to the OpenShell gateway.\n    openshell_bearer_token: Bearer token for OIDC auth to the OpenShell gateway.\n    openshell_oidc_issuer: OIDC issuer URL for client-credentials auth.\n    openshell_oidc_client_id: OIDC client ID for client-credentials auth.\n    openshell_oidc_client_secret: OIDC client secret for client-credentials auth.\n    openshell_oidc_audience: Optional OIDC audience for client-credentials auth."
             },
             "SplunkConfiguration": {
                 "properties": {
@@ -23121,6 +24013,34 @@
                         "object": "list"
                     }
                 ]
+            },
+            "WorkflowEngineConfiguration": {
+                "properties": {
+                    "enabled": {
+                        "type": "boolean",
+                        "title": "Enable workflow engine",
+                        "description": "Whether the /v1/workflows endpoints are active.",
+                        "default": false
+                    },
+                    "max_concurrent_workflows": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0.0,
+                        "title": "Max concurrent workflows",
+                        "description": "Maximum number of simultaneously running workflows.",
+                        "default": 10
+                    },
+                    "transcript_retention_days": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0.0,
+                        "title": "Transcript retention days",
+                        "description": "Days to retain step execution transcripts.",
+                        "default": 30
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "title": "WorkflowEngineConfiguration",
+                "description": "Workflow engine configuration.\n\nAttributes:\n    enabled: Whether the workflow engine is active.\n    max_concurrent_workflows: Maximum simultaneous workflow executions.\n    transcript_retention_days: Days to retain step transcripts."
             }
         }
     },
@@ -23128,6 +24048,10 @@
         {
             "name": "a2a",
             "description": "Agent-to-Agent (A2A) protocol."
+        },
+        {
+            "name": "agents",
+            "description": "Agent execution."
         },
         {
             "name": "authorized",
@@ -23228,6 +24152,10 @@
         {
             "name": "vector-stores",
             "description": "Vector stores and files."
+        },
+        {
+            "name": "workflows",
+            "description": "Multi-step workflow orchestration."
         }
     ]
 }

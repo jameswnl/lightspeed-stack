@@ -186,6 +186,125 @@ def test_spawner_configuration_rejects_leftover_kubernetes_fields() -> None:
         )
 
 
+def test_spawner_configuration_openshell_oidc_accepts_full_config() -> None:
+    """SpawnerConfiguration accepts a full OIDC client-credentials config."""
+    config = SpawnerConfiguration(
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
+        openshell_oidc_issuer="https://keycloak.example.com/realms/agents",
+        openshell_oidc_client_id="my-client",
+        openshell_oidc_client_secret="my-secret",
+        openshell_oidc_audience="my-audience",
+    )
+    assert config.openshell_oidc_issuer == "https://keycloak.example.com/realms/agents"
+    assert config.openshell_oidc_client_id == "my-client"
+    assert (
+        config.openshell_oidc_client_secret is not None
+        and config.openshell_oidc_client_secret.get_secret_value() == "my-secret"
+    )
+    assert config.openshell_oidc_audience == "my-audience"
+
+
+def test_spawner_configuration_openshell_oidc_audience_optional() -> None:
+    """openshell_oidc_audience is optional; issuer/client_id/client_secret are not."""
+    config = SpawnerConfiguration(
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
+        openshell_oidc_issuer="https://keycloak.example.com/realms/agents",
+        openshell_oidc_client_id="my-client",
+        openshell_oidc_client_secret="my-secret",
+    )
+    assert config.openshell_oidc_audience is None
+
+
+def test_spawner_configuration_openshell_oidc_defaults_to_none() -> None:
+    """Without OIDC fields set, all four default to None (existing behavior unaffected)."""
+    config = SpawnerConfiguration(
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
+    )
+    assert config.openshell_oidc_issuer is None
+    assert config.openshell_oidc_client_id is None
+    assert config.openshell_oidc_client_secret is None
+    assert config.openshell_oidc_audience is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"openshell_oidc_client_id": "my-client"}, id="client_id-only"),
+        pytest.param(
+            {"openshell_oidc_client_secret": "my-secret"}, id="client_secret-only"
+        ),
+        pytest.param(
+            {"openshell_oidc_issuer": "https://keycloak.example.com/realms/agents"},
+            id="issuer-only",
+        ),
+        pytest.param(
+            {
+                "openshell_oidc_client_id": "my-client",
+                "openshell_oidc_client_secret": "my-secret",
+            },
+            id="missing-issuer",
+        ),
+        pytest.param(
+            {
+                "openshell_oidc_issuer": "https://keycloak.example.com/realms/agents",
+                "openshell_oidc_client_secret": "my-secret",
+            },
+            id="missing-client_id",
+        ),
+        pytest.param(
+            {
+                "openshell_oidc_issuer": "https://keycloak.example.com/realms/agents",
+                "openshell_oidc_client_id": "my-client",
+            },
+            id="missing-client_secret",
+        ),
+        pytest.param(
+            {"openshell_oidc_audience": "my-audience"},
+            id="audience-only",
+        ),
+    ],
+)
+def test_spawner_configuration_openshell_oidc_rejects_partial_config(
+    overrides: dict[str, Any],
+) -> None:
+    """Setting only some of issuer/client_id/client_secret is rejected.
+
+    A partially-configured OIDC block would silently fall back to the
+    static bearer_token path (or no auth at all) instead of failing
+    loudly -- reject it outright so a config typo is caught at startup,
+    not discovered later as a confusing auth failure against the gateway.
+    """
+    with pytest.raises(ValidationError, match="openshell_oidc"):
+        SpawnerConfiguration(
+            type="openshell",
+            openshell_gateway_url="localhost:9080",
+            **overrides,
+        )
+
+
+def test_spawner_configuration_rejects_oidc_and_bearer_token_together() -> None:
+    """openshell_bearer_token and OIDC fields (including audience) are mutually exclusive.
+
+    Passing both is ambiguous about which auth mechanism should actually
+    be used -- reject it rather than silently picking one. Includes
+    openshell_oidc_audience in the OIDC config to prove the mutex check
+    considers all four OIDC fields, not just the three required ones.
+    """
+    with pytest.raises(ValidationError, match="openshell_bearer_token"):
+        SpawnerConfiguration(
+            type="openshell",
+            openshell_gateway_url="localhost:9080",
+            openshell_bearer_token="secret-token",
+            openshell_oidc_issuer="https://keycloak.example.com/realms/agents",
+            openshell_oidc_client_id="my-client",
+            openshell_oidc_client_secret="my-secret",
+            openshell_oidc_audience="my-audience",
+        )
+
+
 def _make_config(**overrides: Any) -> Configuration:
     """Create a minimal Configuration with optional overrides."""
     defaults = {

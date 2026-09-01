@@ -105,6 +105,74 @@ def test_build_spawner_caches_singleton(mocker: MockerFixture) -> None:
     assert first is second
 
 
+def test_build_spawner_openshell_with_oidc_passes_provider(
+    mocker: MockerFixture,
+) -> None:
+    """OIDC config builds a token provider and passes bearer_token_provider.
+
+    No static bearer_token is forwarded in this case (kept empty, same as
+    the no-auth default) -- the OIDC fields and openshell_bearer_token are
+    mutually exclusive at the SpawnerConfiguration level already.
+    """
+    mock = _patch_cloud_agents_build_spawner(mocker)
+    mock_provider_cls = mocker.patch(
+        "workflow.spawner_factory.OidcClientCredentialsTokenProvider"
+    )
+    mock_provider = mock_provider_cls.return_value
+    config = SpawnerConfiguration(
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
+        openshell_oidc_issuer="https://keycloak.example.com/realms/agents",
+        openshell_oidc_client_id="my-client",
+        openshell_oidc_client_secret="my-secret",
+        openshell_oidc_audience="my-audience",
+    )
+
+    build_spawner(config)
+
+    mock_provider_cls.assert_called_once_with(
+        issuer="https://keycloak.example.com/realms/agents",
+        client_id="my-client",
+        client_secret="my-secret",
+        audience="my-audience",
+    )
+    mock.assert_called_once_with(
+        "openshell",
+        gateway_url="localhost:9080",
+        workspace="default",
+        http_endpoint="",
+        tls_ca="",
+        tls_cert="",
+        tls_key="",
+        bearer_token="",
+        max_pods=10,
+        bearer_token_provider=mock_provider.get_token,
+    )
+
+
+def test_build_spawner_openshell_without_oidc_omits_provider_kwarg(
+    mocker: MockerFixture,
+) -> None:
+    """Without OIDC config, bearer_token_provider is not passed at all.
+
+    Regression test for backward compatibility: existing deployments using
+    the static bearer_token (or no auth) must see the exact same call
+    signature as before this feature existed.
+    """
+    mock = _patch_cloud_agents_build_spawner(mocker)
+    config = SpawnerConfiguration(
+        type="openshell",
+        openshell_gateway_url="localhost:9080",
+        openshell_bearer_token="secret-token",
+    )
+
+    build_spawner(config)
+
+    _, kwargs = mock.call_args
+    assert "bearer_token_provider" not in kwargs
+    assert kwargs["bearer_token"] == "secret-token"
+
+
 def test_reset_spawner_forces_rebuild(mocker: MockerFixture) -> None:
     """reset_spawner() clears the cache so the next call rebuilds."""
     mock = _patch_cloud_agents_build_spawner(mocker)

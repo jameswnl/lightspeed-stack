@@ -33,3 +33,26 @@ class TestRunWorkflowRequest:
             session_id="",
         )
         assert req.session_id is None
+
+    def test_mcp_servers_defaults_to_none(self) -> None:
+        """mcp_servers is optional and defaults to None when omitted."""
+        req = RunWorkflowRequest(definition=_MINIMAL_DEFINITION)
+        assert req.mcp_servers is None
+
+    def test_mcp_servers_accepts_config_dicts(self) -> None:
+        """mcp_servers stores the caller-supplied list of server configs.
+
+        Each entry is a dict ({name, url, headers}) -- run-scoped MCP
+        catalog that spawn:none steps connect to via pydantic-ai
+        MCPToolset. This mirrors AgentRunRequest.mcp_servers so a
+        single-step workflow behaves like POST /v1/agents/run.
+        """
+        servers = [
+            {"name": "pod-status", "url": "http://localhost:9111/mcp"},
+            {"name": "kubectl", "url": "http://kubectl-mcp:8000/mcp"},
+        ]
+        req = RunWorkflowRequest(
+            definition=_MINIMAL_DEFINITION,
+            mcp_servers=servers,
+        )
+        assert req.mcp_servers == servers

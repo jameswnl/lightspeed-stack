@@ -21707,6 +21707,22 @@
                         "title": "Provider",
                         "description": "Default provider config: {name, model, credentials_secret}."
                     },
+                    "mcp_servers": {
+                        "anyOf": [
+                            {
+                                "items": {
+                                    "additionalProperties": true,
+                                    "type": "object"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Mcp Servers",
+                        "description": "Run-scoped MCP server configs: [{name, url, headers}]. Made available to the workflow's steps; spawn:none agent steps connect to them via pydantic-ai MCPToolset."
+                    },
                     "sandbox_image": {
                         "anyOf": [
                             {
@@ -21750,7 +21766,7 @@
                     "definition"
                 ],
                 "title": "RunWorkflowRequest",
-                "description": "Request body for POST /v1/workflows/run.\n\nAttributes:\n    definition: Workflow definition (same schema as cloud-agents YAML).\n    provider: Default LLM provider config for all steps.\n    sandbox_image: Default sandbox image for ephemeral steps.\n    approval_policy: Optional approval policy.\n    session_id: Optional caller-provided ID grouping related workflow runs."
+                "description": "Request body for POST /v1/workflows/run.\n\nAttributes:\n    definition: Workflow definition (same schema as cloud-agents YAML).\n    provider: Default LLM provider config for all steps.\n    sandbox_image: Default sandbox image for ephemeral steps.\n    approval_policy: Optional approval policy.\n    session_id: Optional caller-provided ID grouping related workflow runs.\n    mcp_servers: Run-scoped MCP server configs available to steps."
             },
             "SQLiteDatabaseConfiguration": {
                 "properties": {

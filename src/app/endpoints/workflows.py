@@ -100,6 +100,7 @@ async def start_workflow_handler(
         "sandbox_image": body.sandbox_image or default_sandbox_image,
         "approval_policy": body.approval_policy,
         "session_id": body.session_id,
+        "mcp_servers": body.mcp_servers,
         "user_id": user_id,
         "authz_context": {
             "user_id": user_id,

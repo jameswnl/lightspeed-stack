@@ -48,3 +48,19 @@ class TestCreateWorkflowExecutor:
         executor = create_workflow_runner()
 
         assert executor._spawner is None
+
+    def test_initializes_tracing(self, mocker: MockerFixture) -> None:
+        """Tracing is initialized so cloud-agents spans are exported.
+
+        Without a global TracerProvider the executor's spans are dropped by a
+        NoOp tracer even when OTEL_EXPORTER_OTLP_ENDPOINT is set, so the
+        in-process path must call init_tracing itself.
+        """
+        mock_factory = mocker.patch("workflow.executor_factory.WorkflowStorageFactory")
+        mock_factory.get_run_state_store.return_value = mocker.MagicMock()
+        mock_factory.get_transcript_store.return_value = mocker.MagicMock()
+        mock_init_tracing = mocker.patch("workflow.executor_factory.init_tracing")
+
+        create_workflow_runner()
+
+        mock_init_tracing.assert_called_once_with("workflow-runner")

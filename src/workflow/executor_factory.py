@@ -6,6 +6,7 @@ spawner, driven by lightspeed-stack's configuration.
 
 from typing import Any, Optional
 
+from cloud_agents.runtime.tracing import init_tracing
 from cloud_agents.workflow.executor.base import WorkflowRunner
 from cloud_agents.workflow.executor.local.executor import LocalWorkflowRunner
 
@@ -26,6 +27,14 @@ def create_workflow_runner(
     Returns:
         Configured WorkflowRunner instance.
     """
+    # cloud-agents' executor emits OTEL spans through a tracer that only
+    # records once a global TracerProvider is set. The standalone runner does
+    # this in build_local_app(); the in-process path here must do it
+    # explicitly, or every span is silently dropped (NoOp tracer) even when
+    # OTEL_EXPORTER_OTLP_ENDPOINT is set. init_tracing is itself a no-op when
+    # that env var is unset, so this is safe for the default local path.
+    init_tracing("workflow-runner")
+
     run_state_store = WorkflowStorageFactory.get_run_state_store()
     transcript_store = WorkflowStorageFactory.get_transcript_store()
 

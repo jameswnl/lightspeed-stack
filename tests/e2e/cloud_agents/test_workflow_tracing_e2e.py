@@ -58,6 +58,21 @@ from tests.e2e.cloud_agents.jaeger_helpers import (
     query_jaeger_traces,
     spans_with_operation,
 )
+from tests.e2e.cloud_agents.workflow_e2e_helpers import (
+    DB_URL as _DB_URL,
+)
+from tests.e2e.cloud_agents.workflow_e2e_helpers import (
+    PROVIDER as _PROVIDER,
+)
+from tests.e2e.cloud_agents.workflow_e2e_helpers import (
+    poll_until_status as _poll_until_status,
+)
+from tests.e2e.cloud_agents.workflow_e2e_helpers import (
+    start_and_await_completion as _start_and_await_completion,
+)
+from tests.e2e.cloud_agents.workflow_e2e_helpers import (
+    two_step_definition as _two_step_definition,
+)
 
 pytestmark = [
     pytest.mark.skipif(
@@ -65,15 +80,6 @@ pytestmark = [
         reason="OPENAI_API_KEY not set",
     ),
 ]
-
-_PG_HOST = os.environ.get("WORKFLOW_PG_HOST", "localhost")
-_PG_PORT = os.environ.get("WORKFLOW_PG_PORT", "5432")
-_PG_DB = os.environ.get("WORKFLOW_PG_DB", "lightspeed")
-_PG_USER = os.environ.get("WORKFLOW_PG_USER", "lightspeed")
-_PG_PASSWORD = os.environ.get("WORKFLOW_PG_PASSWORD", "lightspeed")
-_DB_URL = f"postgresql://{_PG_USER}:{_PG_PASSWORD}@{_PG_HOST}:{_PG_PORT}/{_PG_DB}"
-
-_PROVIDER = {"name": "openai", "model": "gpt-4o-mini"}
 
 
 def _find_workflow_definitions_dir() -> Path:
@@ -98,42 +104,6 @@ def _find_workflow_definitions_dir() -> Path:
 
 
 _WF_DIR = _find_workflow_definitions_dir()
-
-
-def _two_step_definition(workflow_name: str) -> dict[str, Any]:
-    """A minimal 2-step, spawn:none, no-approval workflow definition.
-
-    Parameters:
-        workflow_name: Name to embed in the definition's metadata.
-
-    Returns:
-        A workflow definition dict matching the cloud-agents YAML schema.
-    """
-    return {
-        "apiVersion": "v1",
-        "kind": "AgentWorkflow",
-        "metadata": {"name": workflow_name},
-        "spec": {
-            "steps": [
-                {
-                    "name": "step-a",
-                    "type": "agent",
-                    "spawn": "none",
-                    "output_key": "result_a",
-                    "prompt": "Reply with exactly one word: apple",
-                    "timeout_seconds": 30,
-                },
-                {
-                    "name": "step-b",
-                    "type": "agent",
-                    "spawn": "none",
-                    "output_key": "result_b",
-                    "prompt": "Reply with exactly one word: banana",
-                    "timeout_seconds": 30,
-                },
-            ]
-        },
-    }
 
 
 @pytest.fixture(name="tracer", scope="module")
@@ -184,74 +154,6 @@ async def run_state_store_fixture() -> AsyncIterator[Any]:
     yield store
 
     await store.close()
-
-
-async def _poll_until_status(
-    runner: Any,
-    workflow_id: str,
-    target_statuses: set[str],
-    timeout: float = 60.0,
-) -> Any:
-    """Poll get_status() until the run reaches one of the target statuses.
-
-    Deliberately avoids reaching into LocalWorkflowRunner's private
-    `_running` task registry -- a real caller (e.g. the
-    GET /v1/workflows/{id} HTTP endpoint) only ever observes progress via
-    get_status(), never via an in-process task handle, so polling here
-    keeps the test representative of real usage.
-
-    Parameters:
-        runner: LocalWorkflowRunner instance.
-        workflow_id: Target run.
-        target_statuses: Statuses that end the poll loop.
-        timeout: Max seconds to wait before giving up.
-
-    Returns:
-        The WorkflowStatus once a target status is reached.
-
-    Raises:
-        AssertionError: If the timeout elapses before a target status.
-    """
-    loop = asyncio.get_event_loop()
-    deadline = loop.time() + timeout
-    while True:
-        status = await runner.get_status(workflow_id)
-        if status.status in target_statuses:
-            return status
-        if loop.time() >= deadline:
-            raise AssertionError(
-                f"Timed out after {timeout}s waiting for workflow "
-                f"{workflow_id} to reach one of {sorted(target_statuses)}; "
-                f"last status={status.status}"
-            )
-        await asyncio.sleep(0.5)
-
-
-async def _start_and_await_completion(
-    runner: Any, definition: dict[str, Any], session_id: str | None = None
-) -> str:
-    """Start a workflow run and poll until it reaches a terminal status.
-
-    Parameters:
-        runner: LocalWorkflowRunner instance.
-        definition: Workflow definition dict.
-        session_id: Optional session_id to thread into the run's input.
-
-    Returns:
-        The new run's workflow_id, once it has completed.
-    """
-    start_input = {"definition": definition, "provider": _PROVIDER}
-    if session_id is not None:
-        start_input["session_id"] = session_id
-    workflow_id = await runner.start(start_input)
-    status = await _poll_until_status(
-        runner, workflow_id, {"completed", "failed", "cancelled"}
-    )
-    assert status.status == "completed", (
-        f"Workflow did not complete cleanly: status={status.status}, "
-        f"steps={status.steps}"
-    )
-    return workflow_id
 
 
 def _assert_workflow_id_tag(spans: list[dict[str, Any]], workflow_id: str) -> None:

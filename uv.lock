@@ -1793,13 +1793,15 @@ wheels = [
 [[package]]
 name = "lightspeed-cloud-agents"
 version = "0.1.0"
-source = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git?branch=main#f473dc1eebdafdfd91aeafa8002d28537267d218" }
+source = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git?branch=main#a5b30eb832432f78223c9bd1df6126d3a08d5c07" }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
     { name = "prometheus-client" },
     { name = "psycopg2-binary" },

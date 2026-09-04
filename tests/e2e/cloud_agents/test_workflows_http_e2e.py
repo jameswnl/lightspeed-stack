@@ -269,6 +269,7 @@ class TestWorkflowHttpE2E:
                                     "pod named checkout-7f9. Report its exact "
                                     "memory limit and restart count verbatim."
                                 ),
+                                "mcp_servers": ["pod-status"],
                                 "timeout_seconds": 120,
                             },
                         ]

@@ -351,6 +351,7 @@ workflow_none_tools() {
               "name": "check", "type": "agent", "spawn": "none",
               "output_key": "check_result",
               "prompt": "Use the get_pod_status tool to look up pod checkout-7f9. Report its exact memory limit and restart count verbatim.",
+              "mcp_servers": ["pod-status"],
               "timeout_seconds": 120
             }
           ]

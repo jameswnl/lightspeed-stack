@@ -87,6 +87,7 @@ class RunWorkflowRequest(BaseModel):
         sandbox_image: Default sandbox image for ephemeral steps.
         approval_policy: Optional approval policy.
         session_id: Optional caller-provided ID grouping related workflow runs.
+        mcp_servers: Run-scoped MCP server configs available to steps.
     """
 
     definition: dict[str, Any] = Field(
@@ -97,6 +98,13 @@ class RunWorkflowRequest(BaseModel):
     provider: Optional[dict[str, Any]] = Field(
         None,
         description="Default provider config: {name, model, credentials_secret}.",
+    )
+
+    mcp_servers: Optional[list[dict[str, Any]]] = Field(
+        None,
+        description="Run-scoped MCP server configs: [{name, url, headers}]. "
+        "Made available to the workflow's steps; spawn:none agent steps "
+        "connect to them via pydantic-ai MCPToolset.",
     )
 
     sandbox_image: Optional[str] = Field(

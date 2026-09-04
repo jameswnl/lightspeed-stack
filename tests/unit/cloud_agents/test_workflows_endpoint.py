@@ -458,6 +458,79 @@ class TestStartWorkflow:
         assert workflow_input["user_id"] == "user-42"
         assert workflow_input["authz_context"]["user_id"] == "user-42"
 
+    @pytest.mark.asyncio
+    async def test_forwards_mcp_servers(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """Forwards a caller-supplied mcp_servers list into the executor input.
+
+        cloud-agents' LocalWorkflowRunner reads input["mcp_servers"] and
+        threads it to spawn:none steps (graph_translator -> direct.py's
+        pydantic-ai MCPToolset). Without this key the run-scoped MCP
+        catalog never reaches the in-process agent loop, so the model
+        can't call external tools.
+        """
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-abc123"
+
+        servers = [{"name": "pod-status", "url": "http://localhost:9111/mcp"}]
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {
+                    "steps": [
+                        {
+                            "name": "analyze",
+                            "type": "agent",
+                            "output_key": "analysis",
+                            "spawn": "none",
+                            "prompt": "Analyze this",
+                        }
+                    ]
+                },
+            },
+            mcp_servers=servers,
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["mcp_servers"] == servers
+
+    @pytest.mark.asyncio
+    async def test_mcp_servers_omitted_forwards_none(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """Omitting mcp_servers forwards None rather than a missing key."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": []},
+            },
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["mcp_servers"] is None
+
 
 class TestGetWorkflow:
     """Tests for get_workflow_handler."""

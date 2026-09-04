@@ -10,10 +10,12 @@
 # round out the same matrix for parity with the automated e2e suite --
 # they aren't part of that illustration, just additional scenarios:
 #   agent-none                 POST /v1/agents/run,    spawn: "none"
+#   agent-none-tools            POST /v1/agents/run,    spawn: "none",      + MCP tool call
 #   agent-local                 POST /v1/agents/run,    spawn: "local"
 #   agent-ephemeral             POST /v1/agents/run,    spawn: "ephemeral"
 #   workflow-ephemeral-approval POST /v1/workflows/run, spawn: "ephemeral", multi-step + approval
 #   workflow-none-approval      POST /v1/workflows/run, spawn: "none",      multi-step + approval
+#   workflow-none-tools          POST /v1/workflows/run, spawn: "none",      single step + MCP tool call
 #   workflow-local               POST /v1/workflows/run, spawn: "local",     single step
 #   workflow-ephemeral           POST /v1/workflows/run, spawn: "ephemeral", single step, no approval
 #
@@ -23,12 +25,22 @@
 # it can't reliably guarantee schema-conforming JSON the way spawn:none
 # and spawn:ephemeral can.
 #
+# The *-none-tools scenarios exercise a real in-process (spawn:none) agent
+# loop that calls an external MCP tool. They need the companion demo MCP
+# server running first:
+#   uv run python docs/cloud-agents-demo-mcp.py    # serves get_pod_status on :9111
+# Override its URL with DEMO_MCP_URL (default http://localhost:9111/mcp).
+# workflow-none-tools additionally requires this repo's mcp_servers field on
+# POST /v1/workflows/run (RunWorkflowRequest.mcp_servers).
+#
 # Usage:
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-none
+#   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-none-tools
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-local
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-ephemeral
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh workflow-ephemeral-approval
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh workflow-none-approval
+#   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh workflow-none-tools
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh workflow-local
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh workflow-ephemeral
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh discover
@@ -40,6 +52,7 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8090}"
+DEMO_MCP_URL="${DEMO_MCP_URL:-http://localhost:9111/mcp}"
 AUTH_HEADER=()
 if [[ -n "${TOKEN:-}" ]]; then
   AUTH_HEADER=(-H "Authorization: Bearer $TOKEN")
@@ -71,6 +84,26 @@ agent_none() {
         "properties": { "healthy": {"type": "boolean"}, "reason": {"type": "string"} },
         "required": ["healthy", "reason"]
       }
+    }')
+  status="${resp##*$'\n'}"
+  echo "${resp%$'\n'*}" | jq
+  [[ "$status" -lt 400 ]]
+}
+
+agent_none_tools() {
+  echo "== Agent — In-Process + MCP tool (spawn: none) =="
+  echo "   (needs 'uv run python docs/cloud-agents-demo-mcp.py' at $DEMO_MCP_URL)"
+  local resp status
+  resp=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/v1/agents/run" \
+    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "prompt": "Use the get_pod_status tool to look up pod checkout-7f9, then report its exact memory limit and restart count.",
+      "spawn": "none",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "tools": [],
+      "mcp_servers": [{"name": "pod-status", "url": "'"$DEMO_MCP_URL"'"}]
     }')
   status="${resp##*$'\n'}"
   echo "${resp%$'\n'*}" | jq
@@ -299,6 +332,52 @@ workflow_none_approval() {
   curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id/transcripts" | jq
 }
 
+workflow_none_tools() {
+  echo "== Workflow — In-Process + MCP tool (spawn: none, POST /v1/workflows/run) =="
+  echo "   (needs 'uv run python docs/cloud-agents-demo-mcp.py' at $DEMO_MCP_URL)"
+  local resp wf_id
+
+  resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
+    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "definition": {
+        "apiVersion": "v1",
+        "kind": "AgentWorkflow",
+        "metadata": {"name": "none-tools-demo"},
+        "spec": {
+          "steps": [
+            {
+              "name": "check", "type": "agent", "spawn": "none",
+              "output_key": "check_result",
+              "prompt": "Use the get_pod_status tool to look up pod checkout-7f9. Report its exact memory limit and restart count verbatim.",
+              "mcp_servers": ["pod-status"],
+              "timeout_seconds": 120
+            }
+          ]
+        }
+      },
+      "provider": {"name": "openai", "model": "gpt-4o-mini"},
+      "mcp_servers": [{"name": "pod-status", "url": "'"$DEMO_MCP_URL"'"}]
+    }')
+  echo "$resp" | jq
+  wf_id=$(echo "$resp" | jq -r .workflow_id)
+  if [[ -z "$wf_id" || "$wf_id" == "null" ]]; then
+    echo "ERROR: no workflow_id in response" >&2
+    exit 1
+  fi
+  echo "workflow_id=$wf_id"
+
+  echo
+  echo "-- Waiting for a terminal status --"
+  wait_for_status "$wf_id" "completed failed cancelled" 150
+  require_status "completed" "complete successfully"
+
+  echo
+  echo "-- Per-step transcripts (look for the tool's 347Mi value) --"
+  curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id/transcripts" | jq
+}
+
 workflow_local() {
   echo "== Workflow — Subprocess (spawn: local, POST /v1/workflows/run) =="
   local resp wf_id
@@ -388,14 +467,16 @@ workflow_ephemeral() {
 case "${1:-}" in
   discover) discover ;;
   agent-none) agent_none ;;
+  agent-none-tools) agent_none_tools ;;
   agent-local) agent_local ;;
   agent-ephemeral) agent_ephemeral ;;
   workflow-ephemeral-approval) workflow_ephemeral_approval ;;
   workflow-none-approval) workflow_none_approval ;;
+  workflow-none-tools) workflow_none_tools ;;
   workflow-local) workflow_local ;;
   workflow-ephemeral) workflow_ephemeral ;;
   *)
-    echo "Usage: $0 {discover|agent-none|agent-local|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral}" >&2
+    echo "Usage: $0 {discover|agent-none|agent-none-tools|agent-local|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-none-tools|workflow-local|workflow-ephemeral}" >&2
     exit 1
     ;;
 esac

@@ -32,12 +32,82 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
+import json
 import os
+import socket
+import subprocess
+import sys
+import time
+from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from .conftest import postgres_reachable, skip_if_gateway_unreachable, wait_for_status
+
+_DEMO_MCP_SERVER = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "docs"
+    / "cloud-agents-demo-mcp.py"
+)
+
+
+def _free_tcp_port() -> int:
+    """Return an available localhost TCP port.
+
+    Binds port 0, reads the assigned port, and releases it. There is a
+    small race before the MCP subprocess re-binds it, acceptable for a
+    single-process test fixture.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+@pytest.fixture(name="demo_mcp_url")
+def demo_mcp_url_fixture() -> Generator[str, None, None]:
+    """Run docs/cloud-agents-demo-mcp.py and yield its streamable-http URL.
+
+    Provides a real, out-of-process MCP server exposing get_pod_status so a
+    spawn:none workflow step has an actual external tool to call over the
+    wire -- the same server the demo script's *-none-tools scenarios use.
+    """
+    assert _DEMO_MCP_SERVER.exists(), f"demo MCP server not found: {_DEMO_MCP_SERVER}"
+    port = _free_tcp_port()
+    env = {**os.environ, "DEMO_MCP_HOST": "127.0.0.1", "DEMO_MCP_PORT": str(port)}
+    # Not a `with` block: the context-manager form only waits on exit, but
+    # this long-running server must be actively terminated (see finally).
+    proc = subprocess.Popen(  # pylint: disable=consider-using-with
+        [sys.executable, str(_DEMO_MCP_SERVER)],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        # Wait until the port accepts connections (server bound + listening).
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                pytest.fail("demo MCP server exited before becoming ready")
+            with (
+                contextlib.suppress(OSError),
+                socket.create_connection(("127.0.0.1", port), timeout=0.5),
+            ):
+                break
+            time.sleep(0.2)
+        else:
+            pytest.fail(f"demo MCP server did not open port {port} within 15s")
+        yield f"http://127.0.0.1:{port}/mcp"
+    finally:
+        proc.terminate()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5)
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()  # reap the killed process so it can't linger as a zombie
+
 
 pytestmark = [
     pytest.mark.skipif(
@@ -153,6 +223,88 @@ class TestWorkflowHttpE2E:
         transcripts = transcripts_response.json()["transcripts"]
         assert "triage_result" in transcripts
         assert "remediate_result" in transcripts
+
+    @pytest.mark.skipif(
+        bool(os.environ.get("LIGHTSPEED_E2E_USE_MOCK_LLM")),
+        reason="mock LLM returns canned text with no tool calls; "
+        "this test needs a real tool-calling model",
+    )
+    def test_workflow_none_spawn_calls_mcp_tool(
+        self, http_client: TestClient, demo_mcp_url: str
+    ) -> None:
+        """A spawn:none step invokes an MCP tool supplied via the run body.
+
+        Companion automated coverage for docs/cloud-agents-demo-curl.sh's
+        workflow-none-tools scenario, and the seam test for this PR's
+        plumbing: RunWorkflowRequest.mcp_servers -> workflow_input
+        ["mcp_servers"] -> cloud-agents LocalWorkflowRunner -> the
+        spawn:none in-process pydantic-ai agent loop (MCPToolset).
+
+        Proof of real invocation: get_pod_status reports the pod's memory
+        limit as 347Mi -- an odd, non-default value a model won't emit on
+        its own, so seeing it echoed back proves the tool actually ran
+        rather than the answer being hallucinated. (The transcript captures
+        only the model's paraphrased text, not the raw tool result, so the
+        assertion keys on a value the model is asked to repeat verbatim.)
+        Requires a real tool-calling LLM -- the mock LLM returns canned
+        text with no tool calls, so this is skipped under
+        LIGHTSPEED_E2E_USE_MOCK_LLM (see the skipif above).
+        """
+        start_response = http_client.post(
+            "/v1/workflows/run",
+            json={
+                "definition": {
+                    "apiVersion": "v1",
+                    "kind": "AgentWorkflow",
+                    "metadata": {"name": "none-tools-http-e2e"},
+                    "spec": {
+                        "steps": [
+                            {
+                                "name": "check",
+                                "type": "agent",
+                                "spawn": "none",
+                                "output_key": "check_result",
+                                "prompt": (
+                                    "Use the get_pod_status tool to look up the "
+                                    "pod named checkout-7f9. Report its exact "
+                                    "memory limit and restart count verbatim."
+                                ),
+                                "mcp_servers": ["pod-status"],
+                                "timeout_seconds": 120,
+                            },
+                        ]
+                    },
+                },
+                "provider": {"name": "openai", "model": "gpt-4o-mini"},
+                "mcp_servers": [{"name": "pod-status", "url": demo_mcp_url}],
+            },
+        )
+
+        assert start_response.status_code == 202
+        workflow_id = start_response.json()["workflow_id"]
+        assert workflow_id
+
+        completed = wait_for_status(
+            http_client,
+            workflow_id,
+            lambda body: bool(body["is_terminal"]),
+            timeout_s=150,
+        )
+        assert completed["status"] == "completed", completed
+        assert "check_result" in completed["steps"]
+
+        # The tool's odd "347Mi" memory limit is not a value a model emits
+        # on its own -- its presence in the step output/transcripts proves
+        # the tool actually ran through the full HTTP -> runner -> MCPToolset
+        # path (vs. a hallucinated but plausible-looking answer).
+        transcripts_response = http_client.get(
+            f"/v1/workflows/{workflow_id}/transcripts"
+        )
+        assert transcripts_response.status_code == 200
+        haystack = json.dumps(completed["steps"]) + json.dumps(
+            transcripts_response.json()
+        )
+        assert "347Mi" in haystack, haystack
 
     def test_workflow_with_local_spawn_step(self, http_client: TestClient) -> None:
         """A workflow step with spawn:local completes over real HTTP.

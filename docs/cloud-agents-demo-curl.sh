@@ -11,7 +11,7 @@
 # they aren't part of that illustration, just additional scenarios:
 #   agent-none                 POST /v1/agents/run,    spawn: "none"
 #   agent-local                 POST /v1/agents/run,    spawn: "local"
-#   agent-ephemeral             POST /v1/agents/run,    spawn: "ephemeral"
+#   agent-ephemeral             POST /v1/agents/run,    spawn: "ephemeral", k8s-diag skill + Landlock demo
 #   workflow-ephemeral-approval POST /v1/workflows/run, spawn: "ephemeral", multi-step + approval
 #   workflow-none-approval      POST /v1/workflows/run, spawn: "none",      multi-step + approval
 #   workflow-local               POST /v1/workflows/run, spawn: "local",     single step
@@ -22,6 +22,15 @@
 # structured-output mode yet (jameswnl/lightspeed-cloud-agents#235), so
 # it can't reliably guarantee schema-conforming JSON the way spawn:none
 # and spawn:ephemeral can.
+#
+# MCP server reachability: agent-none and agent-local run in-process on
+# this machine, not inside the cluster, so they reach the mock pod-status
+# MCP server (deployed via ~/ws/local-infra's ocp-prod-mcp-pod-status-*
+# targets) at localhost:8084 -- port-forward it first:
+#   oc -n openshell-prod port-forward svc/mcp-pod-status-mock 8084:8084
+# agent-ephemeral runs inside an OpenShell sandbox pod on the cluster, so
+# it reaches the same service via in-cluster DNS instead
+# (mcp-pod-status-mock:8084), no port-forward needed.
 #
 # Usage:
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-none
@@ -44,6 +53,7 @@ AUTH_HEADER=()
 if [[ -n "${TOKEN:-}" ]]; then
   AUTH_HEADER=(-H "Authorization: Bearer $TOKEN")
 fi
+WF_ID=""
 
 discover() {
   echo "== Registered agent tools (spawn:none/local) =="
@@ -53,65 +63,60 @@ discover() {
   curl -s "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/mcp-servers" | jq
 }
 
-agent_none() {
-  echo "== Agent — In-Process (spawn: none) =="
-  local resp status
+run_agent() {
+  # POST an /v1/agents/run payload, pretty-print the body, and fail on
+  # HTTP >= 400. $1: title line, $2: spawn mode, $3: prompt, $4: extra
+  # JSON object merged onto the shared {prompt, spawn, provider, model}
+  # base -- callers only spell out what differs per spawn mode.
+  local title="$1" spawn="$2" prompt="$3" extra="{}"
+  if [[ $# -ge 4 ]]; then
+    extra="$4"
+  fi
+  echo "$title"
+  local payload resp status
+  payload=$(jq -n \
+    --arg prompt "$prompt" \
+    --arg spawn "$spawn" \
+    --argjson extra "$extra" \
+    '{prompt: $prompt, spawn: $spawn, provider: "openai", model: "gpt-5-mini"} + $extra')
   resp=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/v1/agents/run" \
     "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
     -H "Content-Type: application/json" \
-    -d '{
-      "prompt": "Is pod checkout-7f9 healthy?",
-      "spawn": "none",
-      "provider": "openai",
-      "model": "gpt-4o-mini",
+    -d "$payload")
+  status="${resp##*$'\n'}"
+  echo "${resp%$'\n'*}" | jq
+  [[ "$status" -lt 400 ]]
+}
+
+agent_none() {
+  run_agent "== Agent — In-Process (spawn: none) ==" "none" \
+    "Is pod checkout-7f9 healthy?" \
+    '{
       "tools": [],
-      "mcp_servers": null,
+      "mcp_servers": [{"name": "kubectl-mcp", "url": "http://localhost:8084/mcp"}],
       "output_schema": {
         "type": "object",
         "properties": { "healthy": {"type": "boolean"}, "reason": {"type": "string"} },
         "required": ["healthy", "reason"]
       }
-    }')
-  status="${resp##*$'\n'}"
-  echo "${resp%$'\n'*}" | jq
-  [[ "$status" -lt 400 ]]
+    }'
 }
 
 agent_local() {
-  echo "== Agent — Subprocess (spawn: local) =="
-  local resp status
-  resp=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/v1/agents/run" \
-    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "prompt": "Say one sentence confirming pod checkout-7f9 is healthy.",
-      "spawn": "local",
-      "provider": "openai",
-      "model": "gpt-4o-mini",
-      "tools": [],
-      "mcp_servers": null
-    }')
-  status="${resp##*$'\n'}"
-  echo "${resp%$'\n'*}" | jq
-  [[ "$status" -lt 400 ]]
+  run_agent "== Agent — Subprocess (spawn: local) ==" "local" \
+    "Check whether pod checkout-7f9 is healthy and say one sentence confirming the result." \
+    '{"tools": [], "mcp_servers": [{"name": "kubectl-mcp", "url": "http://localhost:8084/mcp"}]}'
 }
 
 agent_ephemeral() {
-  echo "== Agent — OpenShell (spawn: ephemeral) =="
-  local resp status
-  resp=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/v1/agents/run" \
-    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "prompt": "Is pod checkout-7f9 healthy?",
-      "spawn": "ephemeral",
-      "provider": "openai",
-      "model": "gpt-4o-mini",
-      "mcp_servers": [{"name": "kubectl-mcp", "url": "http://kubectl-mcp:8000/mcp"}]
-    }')
-  status="${resp##*$'\n'}"
-  echo "${resp%$'\n'*}" | jq
-  [[ "$status" -lt 400 ]]
+  # allowed_skills=["k8s-diag"]: the spawner materializes just that skill
+  # into the sandbox and Landlock-grants /skills/k8s-diag, so the prompt
+  # below demonstrates both sides -- the allowed skill works, and reading
+  # an unlisted skill (/skills/security-audit) is denied at the filesystem
+  # boundary. Requires those skills baked into the sandbox image (/skills).
+  run_agent "== Agent — OpenShell (spawn: ephemeral, k8s-diag skill + Landlock) ==" "ephemeral" \
+    "Use the k8s-diag skill to check whether pod checkout-7f9 is healthy. Then try reading /skills/security-audit/SKILL.md and report whether that read succeeded or was denied, and why." \
+    '{"mcp_servers": [{"name": "kubectl-mcp", "url": "http://mcp-pod-status-mock:8084/mcp"}], "provider": "openai", "model": "gpt-5-mini"}'
 }
 
 wait_for_status() {
@@ -153,22 +158,23 @@ require_status() {
   fi
 }
 
-workflow_ephemeral_approval() {
-  echo "== Workflow — OpenShell + approval (spawn: ephemeral, POST /v1/workflows/run) =="
-  local resp wf_id
-
-  resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
-    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
-    -H "Content-Type: application/json" \
-    -d '{
+approval_workflow_payload() {
+  # Triage -> human-approval -> remediate definition shared by both
+  # approval demos. $1: spawn mode, $2: workflow name, $3: full remediate
+  # prompt (including the {{ steps.triage_result... }} template ref).
+  jq -n \
+    --arg spawn "$1" \
+    --arg name "$2" \
+    --arg remediate_prompt "$3" \
+    '{
       "definition": {
         "apiVersion": "v1",
         "kind": "AgentWorkflow",
-        "metadata": {"name": "triage-remediate-demo"},
+        "metadata": {"name": $name},
         "spec": {
           "steps": [
             {
-              "name": "triage", "type": "agent", "spawn": "ephemeral",
+              "name": "triage", "type": "agent", "spawn": $spawn,
               "output_key": "triage_result",
               "prompt": "Diagnose the checkout-7f9 pod issue. Report severity and root cause.",
               "output_schema": {
@@ -185,28 +191,84 @@ workflow_ephemeral_approval() {
               "risk_level": "high"
             },
             {
-              "name": "remediate", "type": "agent", "spawn": "ephemeral",
+              "name": "remediate", "type": "agent", "spawn": $spawn,
               "output_key": "remediate_result",
-              "prompt": "Apply the fix for: {{ steps.triage_result.output.root_cause }}",
+              "prompt": $remediate_prompt,
               "condition": "steps.approval.output.approved == true",
               "timeout_seconds": 120
             }
           ]
         }
       },
-      "provider": {"name": "openai", "model": "gpt-4o-mini"}
-    }')
+      "provider": {"name": "openai", "model": "gpt-5-mini"}
+    }'
+}
+
+single_step_workflow_payload() {
+  # Single investigate-step definition shared by the non-approval demos.
+  # $1: spawn mode, $2: workflow name.
+  jq -n \
+    --arg spawn "$1" \
+    --arg name "$2" \
+    '{
+      "definition": {
+        "apiVersion": "v1",
+        "kind": "AgentWorkflow",
+        "metadata": {"name": $name},
+        "spec": {
+          "steps": [
+            {
+              "name": "investigate", "type": "agent", "spawn": $spawn,
+              "output_key": "investigate_result",
+              "prompt": "Say one sentence confirming the checkout-7f9 pod is healthy.",
+              "timeout_seconds": 120
+            }
+          ]
+        }
+      },
+      "provider": {"name": "openai", "model": "gpt-5-mini"}
+    }'
+}
+
+submit_workflow() {
+  # POST $1 to /v1/workflows/run, print the response, and set WF_ID
+  # (intentionally global, mirroring WORKFLOW_STATUS) to the created
+  # workflow id. Exits non-zero when the response carries no id.
+  local payload="$1" resp
+  resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
+    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
+    -H "Content-Type: application/json" \
+    -d "$payload")
   echo "$resp" | jq
-  wf_id=$(echo "$resp" | jq -r .workflow_id)
-  if [[ -z "$wf_id" || "$wf_id" == "null" ]]; then
+  WF_ID=$(echo "$resp" | jq -r .workflow_id)
+  if [[ -z "$WF_ID" || "$WF_ID" == "null" ]]; then
     echo "ERROR: no workflow_id in response" >&2
     exit 1
   fi
-  echo "workflow_id=$wf_id"
+  echo "workflow_id=$WF_ID"
+}
+
+finish_workflow() {
+  # Wait for a terminal status and print per-step transcripts.
+  # $1: workflow id, $2: wait budget in seconds (default 30).
+  local wf_id="$1" budget="${2:-30}"
+  echo
+  echo "-- Waiting for a terminal status --"
+  wait_for_status "$wf_id" "completed failed cancelled" "$budget"
+  require_status "completed" "complete successfully"
 
   echo
+  echo "-- Per-step transcripts --"
+  curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id/transcripts" | jq
+}
+
+approval_cycle() {
+  # Pause -> approve -> finish flow shared by both approval demos.
+  # $1: workflow id, $2: wait budget in seconds (default 30).
+  local wf_id="$1" budget="${2:-30}"
+  echo
   echo "-- Waiting for status 'paused' at 'approve' --"
-  wait_for_status "$wf_id" "paused failed cancelled completed" 150
+  wait_for_status "$wf_id" "paused failed cancelled completed" "$budget"
   require_status "paused" "pause for approval"
 
   echo
@@ -216,173 +278,33 @@ workflow_ephemeral_approval() {
     -H "Content-Type: application/json" \
     -d '{"step_name": "approve", "decision": "approved", "approver": "demo-user"}' | jq
 
-  echo
-  echo "-- Waiting for a terminal status --"
-  wait_for_status "$wf_id" "completed failed cancelled" 150
-  require_status "completed" "complete successfully"
+  finish_workflow "$wf_id" "$budget"
+}
 
-  echo
-  echo "-- Per-step transcripts --"
-  curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id/transcripts" | jq
+workflow_ephemeral_approval() {
+  echo "== Workflow — OpenShell + approval (spawn: ephemeral, POST /v1/workflows/run) =="
+  submit_workflow "$(approval_workflow_payload "ephemeral" "triage-remediate-demo" \
+    "Apply the fix for: {{ steps.triage_result.output.root_cause }}")"
+  approval_cycle "$WF_ID" 150
 }
 
 workflow_none_approval() {
   echo "== Workflow — In-Process + approval (spawn: none, POST /v1/workflows/run) =="
-  local resp wf_id
-
-  resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
-    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "definition": {
-        "apiVersion": "v1",
-        "kind": "AgentWorkflow",
-        "metadata": {"name": "triage-remediate-none-demo"},
-        "spec": {
-          "steps": [
-            {
-              "name": "triage", "type": "agent", "spawn": "none",
-              "output_key": "triage_result",
-              "prompt": "Diagnose the checkout-7f9 pod issue. Report severity and root cause.",
-              "output_schema": {
-                "type": "object",
-                "properties": {"severity": {"type": "string"}, "root_cause": {"type": "string"}},
-                "required": ["severity", "root_cause"]
-              },
-              "timeout_seconds": 120
-            },
-            {
-              "name": "approve", "type": "human-approval",
-              "output_key": "approval",
-              "message": "Root cause: {{ steps.triage_result.output.root_cause }}. Approve remediation?",
-              "risk_level": "high"
-            },
-            {
-              "name": "remediate", "type": "agent", "spawn": "none",
-              "output_key": "remediate_result",
-              "prompt": "Say one sentence confirming the fix for: {{ steps.triage_result.output.root_cause }}",
-              "condition": "steps.approval.output.approved == true",
-              "timeout_seconds": 120
-            }
-          ]
-        }
-      },
-      "provider": {"name": "openai", "model": "gpt-4o-mini"}
-    }')
-  echo "$resp" | jq
-  wf_id=$(echo "$resp" | jq -r .workflow_id)
-  if [[ -z "$wf_id" || "$wf_id" == "null" ]]; then
-    echo "ERROR: no workflow_id in response" >&2
-    exit 1
-  fi
-  echo "workflow_id=$wf_id"
-
-  echo
-  echo "-- Waiting for status 'paused' at 'approve' --"
-  wait_for_status "$wf_id" "paused failed cancelled completed"
-  require_status "paused" "pause for approval"
-
-  echo
-  echo "-- Approving 'approve' step --"
-  curl -sf -X POST "$BASE_URL/v1/workflows/$wf_id/approve" \
-    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
-    -H "Content-Type: application/json" \
-    -d '{"step_name": "approve", "decision": "approved", "approver": "demo-user"}' | jq
-
-  echo
-  echo "-- Waiting for a terminal status --"
-  wait_for_status "$wf_id" "completed failed cancelled"
-  require_status "completed" "complete successfully"
-
-  echo
-  echo "-- Per-step transcripts --"
-  curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id/transcripts" | jq
+  submit_workflow "$(approval_workflow_payload "none" "triage-remediate-none-demo" \
+    "Say one sentence confirming the fix for: {{ steps.triage_result.output.root_cause }}")"
+  approval_cycle "$WF_ID" 30
 }
 
 workflow_local() {
   echo "== Workflow — Subprocess (spawn: local, POST /v1/workflows/run) =="
-  local resp wf_id
-
-  resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
-    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "definition": {
-        "apiVersion": "v1",
-        "kind": "AgentWorkflow",
-        "metadata": {"name": "investigate-local-demo"},
-        "spec": {
-          "steps": [
-            {
-              "name": "investigate", "type": "agent", "spawn": "local",
-              "output_key": "investigate_result",
-              "prompt": "Say one sentence confirming the checkout-7f9 pod is healthy.",
-              "timeout_seconds": 120
-            }
-          ]
-        }
-      },
-      "provider": {"name": "openai", "model": "gpt-4o-mini"}
-    }')
-  echo "$resp" | jq
-  wf_id=$(echo "$resp" | jq -r .workflow_id)
-  if [[ -z "$wf_id" || "$wf_id" == "null" ]]; then
-    echo "ERROR: no workflow_id in response" >&2
-    exit 1
-  fi
-  echo "workflow_id=$wf_id"
-
-  echo
-  echo "-- Waiting for a terminal status --"
-  wait_for_status "$wf_id" "completed failed cancelled" 150
-  require_status "completed" "complete successfully"
-
-  echo
-  echo "-- Per-step transcripts --"
-  curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id/transcripts" | jq
+  submit_workflow "$(single_step_workflow_payload "local" "investigate-local-demo")"
+  finish_workflow "$WF_ID" 150
 }
 
 workflow_ephemeral() {
   echo "== Workflow — OpenShell, no approval (spawn: ephemeral, POST /v1/workflows/run) =="
-  local resp wf_id
-
-  resp=$(curl -sf -X POST "$BASE_URL/v1/workflows/run" \
-    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "definition": {
-        "apiVersion": "v1",
-        "kind": "AgentWorkflow",
-        "metadata": {"name": "investigate-ephemeral-demo"},
-        "spec": {
-          "steps": [
-            {
-              "name": "investigate", "type": "agent", "spawn": "ephemeral",
-              "output_key": "investigate_result",
-              "prompt": "Say one sentence confirming the checkout-7f9 pod is healthy.",
-              "timeout_seconds": 120
-            }
-          ]
-        }
-      },
-      "provider": {"name": "openai", "model": "gpt-4o-mini"}
-    }')
-  echo "$resp" | jq
-  wf_id=$(echo "$resp" | jq -r .workflow_id)
-  if [[ -z "$wf_id" || "$wf_id" == "null" ]]; then
-    echo "ERROR: no workflow_id in response" >&2
-    exit 1
-  fi
-  echo "workflow_id=$wf_id"
-
-  echo
-  echo "-- Waiting for a terminal status --"
-  wait_for_status "$wf_id" "completed failed cancelled" 150
-  require_status "completed" "complete successfully"
-
-  echo
-  echo "-- Per-step transcripts --"
-  curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id/transcripts" | jq
+  submit_workflow "$(single_step_workflow_payload "ephemeral" "investigate-ephemeral-demo")"
+  finish_workflow "$WF_ID" 150
 }
 
 case "${1:-}" in

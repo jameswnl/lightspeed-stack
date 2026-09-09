@@ -452,6 +452,98 @@ class TestRunAgentHandler:
         assert "credentials_secret" not in call_args.provider
 
     @pytest.mark.asyncio
+    async def test_allowed_skills_reach_step_input_and_raw_step(
+        self,
+        mocker: MockerFixture,
+        mock_executor: Any,
+    ) -> None:
+        """allowed_skills is threaded to StepInput and the raw step dict.
+
+        DirectExecutor/SubprocessExecutor read step_input.allowed_skills;
+        SandboxExecutor only forwards step_input.raw_step to step_runner,
+        which is where spawner.spawn(allowed_skills=...) (per-skill
+        Landlock grants) comes from. Both must carry the allowlist or the
+        ephemeral path silently drops it.
+        """
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+        mock_cfg = mocker.patch("app.endpoints.agents.configuration")
+        spawner_config = mocker.MagicMock()
+        spawner_config.sandbox_image = "default-sandbox:latest"
+        mock_cfg.spawner_configuration = spawner_config
+        mock_cfg.inference.default_provider = None
+        mock_cfg.inference.default_model = None
+        mocker.patch(
+            "app.endpoints.agents.build_spawner", return_value=mocker.MagicMock()
+        )
+
+        body = AgentRunRequest(
+            prompt="Diagnose the pod",
+            spawn="ephemeral",
+            provider="openai",
+            model="gpt-4o-mini",
+            allowed_skills=["k8s-diag"],
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await run_agent_handler.__wrapped__(request, body, auth)
+
+        call_args = mock_executor.run.call_args[0][0]
+        assert call_args.allowed_skills == ["k8s-diag"]
+        assert call_args.raw_step["allowed_skills"] == ["k8s-diag"]
+        assert call_args.raw_step["name"] == "agent-run"
+
+    @pytest.mark.asyncio
+    async def test_raw_step_selects_request_mcp_servers_by_name(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """raw_step lists request MCP server names for step_runner injection.
+
+        step_runner only injects catalog entries (StepInput.mcp_servers)
+        whose names appear in step["mcp_servers"] -- without the name list,
+        LIGHTSPEED_MCP_SERVERS is never set and the sandbox agent has no
+        MCP tools to call.
+        """
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+
+        body = AgentRunRequest(
+            prompt="Check the pod",
+            provider="openai",
+            model="gpt-4o-mini",
+            mcp_servers=[{"name": "pod-status", "url": "http://x/mcp"}],
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await run_agent_handler.__wrapped__(request, body, auth)
+
+        call_args = mock_executor.run.call_args[0][0]
+        assert call_args.raw_step["mcp_servers"] == ["pod-status"]
+
+    @pytest.mark.asyncio
+    async def test_allowed_skills_omitted_means_no_skills(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """Omitted allowed_skills stays None (no skills), not empty filtering."""
+        mocker.patch("app.endpoints.agents.check_configuration_loaded")
+
+        body = AgentRunRequest(prompt="Hello", provider="openai", model="gpt-4o-mini")
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await run_agent_handler.__wrapped__(request, body, auth)
+
+        call_args = mock_executor.run.call_args[0][0]
+        assert call_args.allowed_skills is None
+        assert call_args.raw_step["allowed_skills"] is None
+
+    @pytest.mark.asyncio
     async def test_local_spawn_result_shape(
         self,
         mocker: MockerFixture,

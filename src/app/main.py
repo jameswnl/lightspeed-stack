@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Final
 
 import sentry_sdk  # pyright: ignore[reportMissingImports]
+from cloud_agents.runtime.tracing import init_tracing
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -86,6 +87,17 @@ async def lifespan(  # pylint: disable=too-many-branches,too-many-statements,imp
     configuration.load_configuration(os.environ["LIGHTSPEED_STACK_CONFIG_PATH"])
 
     initialize_sentry()
+
+    # cloud-agents' step/workflow executors emit OTEL spans through a tracer
+    # that only records once a global TracerProvider is set -- otherwise
+    # every span is silently dropped (NoOp tracer) even when
+    # OTEL_EXPORTER_OTLP_ENDPOINT is set. workflow.executor_factory already
+    # does this for /v1/workflows/run, but /v1/agents/run (agents.py) uses
+    # the step executors directly and never triggers it, so its spans were
+    # never exported. init_tracing is idempotent and a no-op when
+    # OTEL_EXPORTER_OTLP_ENDPOINT is unset, so calling it once here covers
+    # every code path.
+    init_tracing("workflow-runner")
 
     llama_stack_config = configuration.configuration.llama_stack
     await AsyncOgxClientHolder().load(llama_stack_config)

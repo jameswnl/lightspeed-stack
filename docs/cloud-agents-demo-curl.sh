@@ -23,6 +23,15 @@
 # it can't reliably guarantee schema-conforming JSON the way spawn:none
 # and spawn:ephemeral can.
 #
+# MCP server reachability: agent-none and agent-local run in-process on
+# this machine, not inside the cluster, so they reach the mock pod-status
+# MCP server (deployed via ~/ws/local-infra's ocp-prod-mcp-pod-status-*
+# targets) at localhost:8084 -- port-forward it first:
+#   oc -n openshell-prod port-forward svc/mcp-pod-status-mock 8084:8084
+# agent-ephemeral runs inside an OpenShell sandbox pod on the cluster, so
+# it reaches the same service via in-cluster DNS instead
+# (mcp-pod-status-mock:8084), no port-forward needed.
+#
 # Usage:
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-none
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-local
@@ -84,7 +93,7 @@ agent_none() {
     "Is pod checkout-7f9 healthy?" \
     '{
       "tools": [],
-      "mcp_servers": null,
+      "mcp_servers": [{"name": "kubectl-mcp", "url": "http://localhost:8084/mcp"}],
       "output_schema": {
         "type": "object",
         "properties": { "healthy": {"type": "boolean"}, "reason": {"type": "string"} },
@@ -95,8 +104,8 @@ agent_none() {
 
 agent_local() {
   run_agent "== Agent — Subprocess (spawn: local) ==" "local" \
-    "Say one sentence confirming pod checkout-7f9 is healthy." \
-    '{"tools": [], "mcp_servers": null}'
+    "Check whether pod checkout-7f9 is healthy and say one sentence confirming the result." \
+    '{"tools": [], "mcp_servers": [{"name": "kubectl-mcp", "url": "http://localhost:8084/mcp"}]}'
 }
 
 agent_ephemeral() {

@@ -17,7 +17,7 @@
     },
     "servers": [
         {
-            "url": "http://localhost:8080",
+            "url": "/",
             "description": "Locally running service"
         }
     ],
@@ -12660,6 +12660,21 @@
                         "title": "Mcp Servers",
                         "description": "MCP server configs: [{name, url, headers}]. Each server is connected via pydantic-ai MCPToolset."
                     },
+                    "allowed_skills": {
+                        "anyOf": [
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Allowed Skills",
+                        "description": "Skill allowlist: names of skill subdirectories the agent may use. For spawn=ephemeral the spawner materializes just this subset into the sandbox and Landlock-grants each /skills/<name> path, so unlisted skills are denied at the filesystem boundary. Omitted means no skills."
+                    },
                     "output_schema": {
                         "anyOf": [
                             {
@@ -12692,7 +12707,7 @@
                     "prompt"
                 ],
                 "title": "AgentRunRequest",
-                "description": "Request body for POST /v1/agents/run.\n\nAll agent parameters are passed inline \u2014 no registry lookup.\n\nAttributes:\n    prompt: The task prompt for the agent.\n    instructions: System prompt / instructions.\n    model: Full model ID (e.g. \"openai/gpt-4o\").\n    provider: Provider name (used with model if no slash in model).\n    spawn: Execution mode.\n    sandbox_image: Container image for spawn=ephemeral.\n    tools: Tool definitions.\n    mcp_servers: MCP server names.\n    output_schema: JSON Schema for structured output.\n    context: Prior context (e.g. from previous steps)."
+                "description": "Request body for POST /v1/agents/run.\n\nAll agent parameters are passed inline \u2014 no registry lookup.\n\nAttributes:\n    prompt: The task prompt for the agent.\n    instructions: System prompt / instructions.\n    model: Full model ID (e.g. \"openai/gpt-4o\").\n    provider: Provider name (used with model if no slash in model).\n    spawn: Execution mode.\n    sandbox_image: Container image for spawn=ephemeral.\n    tools: Tool definitions.\n    mcp_servers: MCP server names.\n    allowed_skills: Skill allowlist (names of skill subdirectories).\n    output_schema: JSON Schema for structured output.\n    context: Prior context (e.g. from previous steps)."
             },
             "AgentSkill": {
                 "properties": {

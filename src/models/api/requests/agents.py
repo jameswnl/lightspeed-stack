@@ -19,6 +19,7 @@ class AgentRunRequest(BaseModel):
         sandbox_image: Container image for spawn=ephemeral.
         tools: Tool definitions.
         mcp_servers: MCP server names.
+        allowed_skills: Skill allowlist (names of skill subdirectories).
         output_schema: JSON Schema for structured output.
         context: Prior context (e.g. from previous steps).
     """
@@ -65,6 +66,15 @@ class AgentRunRequest(BaseModel):
         None,
         description="MCP server configs: [{name, url, headers}]. "
         "Each server is connected via pydantic-ai MCPToolset.",
+    )
+
+    allowed_skills: Optional[list[str]] = Field(
+        None,
+        description="Skill allowlist: names of skill subdirectories the agent "
+        "may use. For spawn=ephemeral the spawner materializes just this "
+        "subset into the sandbox and Landlock-grants each /skills/<name> "
+        "path, so unlisted skills are denied at the filesystem boundary. "
+        "Omitted means no skills.",
     )
 
     output_schema: Optional[dict[str, Any]] = Field(

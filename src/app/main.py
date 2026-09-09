@@ -180,9 +180,7 @@ app = FastAPI(
         "name": "Apache 2.0",
         "url": "https://www.apache.org/licenses/LICENSE-2.0.html",
     },
-    servers=[
-        {"url": "http://localhost:8080", "description": "Locally running service"}
-    ],
+    servers=[{"url": "/", "description": "Locally running service"}],
     openapi_tags=_OPENAPI_TAGS,
     lifespan=lifespan,
 )

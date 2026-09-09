@@ -80,7 +80,7 @@ async def run_agent_handler(
         spawner=spawner,
     )
 
-    user_id, username, _, _ = auth
+    user_id, _, _, _ = auth
 
     step_input_kwargs: dict[str, Any] = {
         "prompt": body.prompt,
@@ -89,9 +89,24 @@ async def run_agent_handler(
         "output_schema": body.output_schema,
         "tools": body.tools,
         "mcp_servers": body.mcp_servers,
+        "allowed_skills": body.allowed_skills,
         "context": body.context or {},
         "step_name": "agent-run",
         "output_key": "result",
+        # Raw step definition so the ephemeral path (SandboxExecutor ->
+        # step_runner -> spawner.spawn) sees allowed_skills and can
+        # materialize just that subset with per-skill Landlock grants.
+        # Other executors ignore raw_step and read allowed_skills directly.
+        # mcp_servers names are selected here too: step_runner only injects
+        # catalog entries (StepInput.mcp_servers) whose names the step lists,
+        # so without this the sandbox never sees request-level MCP servers.
+        "raw_step": {
+            "name": "agent-run",
+            "prompt": body.prompt,
+            "output_key": "result",
+            "allowed_skills": body.allowed_skills,
+            "mcp_servers": [s["name"] for s in (body.mcp_servers or []) if "name" in s],
+        },
         "metadata": StepMetadata(user_id=user_id),
     }
     if sandbox_image:

@@ -81,7 +81,11 @@ class TestOneStepWorkflowContract:
         assert step_input.timeout_seconds == 120
 
     def test_bare_one_step_defaults(self) -> None:
-        """A bare single step defaults to name 'agent' / output_key 'result'."""
+        """A bare single step defaults to agent/result naming and ephemeral spawn.
+
+        Locks in the canonical one-step defaults: the ``agent`` /
+        ``result`` naming convention and the ``ephemeral`` spawn default.
+        """
         definition = _one_step_definition({"prompt": "Inspect the cluster"})
 
         assert validate_definition(definition) == []
@@ -90,6 +94,7 @@ class TestOneStepWorkflowContract:
         assert len(agent_steps) == 1
         assert agent_steps[0].name == "agent"
         assert agent_steps[0].output_key == "result"
+        assert agent_steps[0].spawn == "ephemeral"
 
     def test_one_step_matches_multi_step_normalization(self) -> None:
         """A one-step workflow normalizes identically to the same multi-step step.

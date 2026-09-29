@@ -108,6 +108,26 @@ class TestGetExecutor:
         mock_create_runner.assert_called_once_with(spawner=None)
 
 
+def _valid_definition() -> dict[str, Any]:
+    """Minimal valid one-step workflow definition for handler tests."""
+    return {
+        "apiVersion": "v1",
+        "kind": "AgentWorkflow",
+        "metadata": {"name": "test-wf"},
+        "spec": {
+            "steps": [
+                {
+                    "name": "agent",
+                    "type": "agent",
+                    "prompt": "Do it",
+                    "output_key": "result",
+                    "spawn": "none",
+                }
+            ]
+        },
+    }
+
+
 class TestStartWorkflow:
     """Tests for start_workflow_handler."""
 
@@ -207,12 +227,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
         )
         auth = ("user-1", "testuser", False, "token")
         request = mocker.MagicMock()
@@ -237,12 +252,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
             provider={"name": "anthropic", "model": "claude-sonnet-5"},
         )
         auth = ("user-1", "testuser", False, "token")
@@ -253,6 +263,160 @@ class TestStartWorkflow:
         workflow_input = mock_executor.start.call_args[0][0]
         assert workflow_input["provider"]["name"] == "anthropic"
         assert workflow_input["provider"]["model"] == "claude-sonnet-5"
+
+    @pytest.mark.asyncio
+    async def test_secret_bearing_mcp_definition_rejected_with_422(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A definition with a credentialed MCP URL is rejected before start.
+
+        Regression test: LocalWorkflowRunner.start persists the raw
+        definition before build_graph/normalization runs, so without this
+        route-level gate the request would return 202 and store the
+        secret-bearing URL in workflow state first.
+        """
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {
+                    "steps": [
+                        {
+                            "name": "agent",
+                            "type": "agent",
+                            "prompt": "Do it",
+                            "output_key": "result",
+                            "mcp_servers": [
+                                {
+                                    "name": "cluster",
+                                    "url": "https://admin:s3cret@example.com/mcp",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+            provider={"name": "openai", "model": "gpt-4o-mini"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert exc_info.value.status_code == 422
+        assert "validation_errors" in exc_info.value.detail
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_secret_shaped_run_credentials_rejected_with_422(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A secret-shaped run-level credentials_secret is rejected before start."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+
+        body = RunWorkflowRequest(
+            definition=_valid_definition(),
+            provider={
+                "name": "openai",
+                "model": "gpt-4o-mini",
+                "credentials_secret": "sk-test",
+            },
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert exc_info.value.status_code == 422
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_malformed_definition_rejected_with_422(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A structurally invalid definition is rejected before start."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": "not-a-list"},
+            },
+            provider={"name": "openai", "model": "gpt-4o-mini"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert exc_info.value.status_code == 422
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unknown_step_type_rejected_with_422(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """An unknown step type fails model validation before start."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {
+                    "steps": [
+                        {
+                            "name": "weird",
+                            "type": "bogus",
+                            "prompt": "Do it",
+                            "output_key": "result",
+                        }
+                    ]
+                },
+            },
+            provider={"name": "openai", "model": "gpt-4o-mini"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert exc_info.value.status_code == 422
+        mock_executor.start.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_credentials_secret_added_for_known_provider(
@@ -272,12 +436,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
             provider={"name": "anthropic", "model": "claude-sonnet-5"},
         )
         auth = ("user-1", "testuser", False, "token")
@@ -301,12 +460,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
             provider={"name": "bedrock", "model": "some-model"},
         )
         auth = ("user-1", "testuser", False, "token")
@@ -330,12 +484,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
             provider={
                 "name": "openai",
                 "model": "gpt-4o",
@@ -370,12 +519,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
         )
         auth = ("user-1", "testuser", False, "token")
         request = mocker.MagicMock()
@@ -400,12 +544,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
             sandbox_image="custom-sandbox:v9",
         )
         auth = ("user-1", "testuser", False, "token")
@@ -429,12 +568,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
         )
         auth = ("user-1", "testuser", False, "token")
         request = mocker.MagicMock()

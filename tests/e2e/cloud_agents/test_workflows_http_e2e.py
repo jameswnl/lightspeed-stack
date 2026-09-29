@@ -442,3 +442,139 @@ class TestOneStepWorkflowHttpE2E:
         )
         assert transcripts_response.status_code == 200
         assert "result" in transcripts_response.json()["transcripts"]
+
+    def test_secret_bearing_definition_rejected_with_422(
+        self, http_client: TestClient
+    ) -> None:
+        """A credentialed MCP URL is rejected at submission, before persistence.
+
+        The runner persists the raw definition before normalization runs,
+        so the route must return 422 here -- a 202 would store the
+        secret-bearing URL in workflow state first.
+        """
+        start_response = http_client.post(
+            "/v1/workflows/run",
+            json={
+                "definition": {
+                    "apiVersion": "v1",
+                    "kind": "AgentWorkflow",
+                    "metadata": {"name": "one-shot-agent"},
+                    "spec": {
+                        "steps": [
+                            {
+                                "name": "agent",
+                                "type": "agent",
+                                "spawn": "none",
+                                "output_key": "result",
+                                "prompt": "Is pod checkout-7f9 healthy?",
+                                "mcp_servers": [
+                                    {
+                                        "name": "cluster",
+                                        "url": "https://admin:s3cret@example.com/mcp",
+                                    }
+                                ],
+                                "timeout_seconds": 120,
+                            },
+                        ]
+                    },
+                },
+                "provider": {"name": "openai", "model": "gpt-4o-mini"},
+            },
+        )
+
+        assert start_response.status_code == 422
+        assert "workflow_id" not in start_response.json()
+
+    def test_one_step_workflow_with_local_spawn(self, http_client: TestClient) -> None:
+        """One-step spawn:local workflow completes over real HTTP.
+
+        No output_schema (see test_workflow_with_local_spawn_step): the
+        SubprocessExecutor has no native structured-output mode yet
+        (jameswnl/lightspeed-cloud-agents#235).
+        """
+        start_response = http_client.post(
+            "/v1/workflows/run",
+            json={
+                "definition": {
+                    "apiVersion": "v1",
+                    "kind": "AgentWorkflow",
+                    "metadata": {"name": "one-shot-agent-local"},
+                    "spec": {
+                        "steps": [
+                            {
+                                "name": "agent",
+                                "type": "agent",
+                                "spawn": "local",
+                                "output_key": "result",
+                                "prompt": (
+                                    "Say one sentence confirming the "
+                                    "checkout-7f9 pod is healthy."
+                                ),
+                                "timeout_seconds": 120,
+                            },
+                        ]
+                    },
+                },
+                "provider": {"name": "openai", "model": "gpt-4o-mini"},
+            },
+        )
+
+        assert start_response.status_code == 202
+        workflow_id = start_response.json()["workflow_id"]
+        assert workflow_id
+
+        completed = wait_for_status(
+            http_client,
+            workflow_id,
+            lambda body: bool(body["is_terminal"]),
+            timeout_s=150,
+        )
+        assert completed["status"] == "completed"
+        assert "result" in completed["steps"]
+
+    @pytest.mark.ephemeral
+    def test_one_step_workflow_with_ephemeral_spawn(
+        self, http_client: TestClient
+    ) -> None:
+        """One-step spawn:ephemeral workflow completes over real HTTP."""
+        skip_if_gateway_unreachable()
+
+        start_response = http_client.post(
+            "/v1/workflows/run",
+            json={
+                "definition": {
+                    "apiVersion": "v1",
+                    "kind": "AgentWorkflow",
+                    "metadata": {"name": "one-shot-agent-ephemeral"},
+                    "spec": {
+                        "steps": [
+                            {
+                                "name": "agent",
+                                "type": "agent",
+                                "spawn": "ephemeral",
+                                "output_key": "result",
+                                "prompt": (
+                                    "Say one sentence confirming the "
+                                    "checkout-7f9 pod is healthy."
+                                ),
+                                "timeout_seconds": 120,
+                            },
+                        ]
+                    },
+                },
+                "provider": {"name": "openai", "model": "gpt-4o-mini"},
+            },
+        )
+
+        assert start_response.status_code == 202
+        workflow_id = start_response.json()["workflow_id"]
+        assert workflow_id
+
+        completed = wait_for_status(
+            http_client,
+            workflow_id,
+            lambda body: bool(body["is_terminal"]),
+            timeout_s=150,
+        )
+        assert completed["status"] == "completed"
+        assert "result" in completed["steps"]

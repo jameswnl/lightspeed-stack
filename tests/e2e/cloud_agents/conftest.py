@@ -3,9 +3,9 @@
 See mock_llm_env.py for the LIGHTSPEED_E2E_USE_MOCK_LLM gating logic the
 autouse fixture below wraps.
 
-LIGHTSPEED_E2E_USE_MOCK_LLM is only safe for test_agents_run_http_e2e.py /
-test_workflows_http_e2e.py (plus this module's own self-tests) -- those
-files' assertions are structural only (status/key-presence), by design, so
+LIGHTSPEED_E2E_USE_MOCK_LLM is only safe for
+test_workflows_http_e2e.py (plus this module's own self-tests) -- that
+file's assertions are structural only (status/key-presence), by design, so
 a canned response satisfies them. Every other file in this directory
 asserts real-world semantic content (e.g. "paris" in output) that only a
 real LLM can produce -- running those with the mock active fails

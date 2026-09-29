@@ -16,7 +16,6 @@ graph TB
         subgraph new["New Endpoints"]
             qd["/query/direct"]
             qds["/query/direct/stream"]
-            ar["/agents/run"]
             wf["/workflows/*"]
             at["/agent-tools"]
         end
@@ -62,8 +61,8 @@ sequenceDiagram
     participant LLM as OpenAI API
     participant MCP as MCP Server
 
-    Client->>FastAPI: POST /agents/run
-    FastAPI->>DirectExecutor: run(StepInput)
+    Client->>FastAPI: POST /v1/workflows/run (one step)
+    FastAPI->>DirectExecutor: runner normalizes, run(step)
     DirectExecutor->>Agent: Agent("openai:gpt-4o-mini")
     Agent->>LLM: inference call
     LLM-->>Agent: response
@@ -75,7 +74,7 @@ sequenceDiagram
     end
     Agent-->>DirectExecutor: AgentRunResult
     DirectExecutor-->>FastAPI: StepResult
-    FastAPI-->>Client: JSON response
+    FastAPI-->>Client: 202 Accepted, then status/transcripts
 ```
 
 **When to use:** Default for all queries and workflow steps. Low latency, no infrastructure needed.
@@ -95,8 +94,8 @@ sequenceDiagram
     participant Agent as pydantic-ai Agent
     participant LLM as OpenAI API
 
-    Client->>FastAPI: POST /agents/run
-    FastAPI->>SubprocessExec: run(StepInput)
+    Client->>FastAPI: POST /v1/workflows/run (one step)
+    FastAPI->>SubprocessExec: runner normalizes, run(step)
     SubprocessExec->>Child: spawn subprocess
     Note over Child: Inherits env vars<br/>(OPENAI_API_KEY, etc.)
     Child->>Agent: create Agent with tools
@@ -106,7 +105,7 @@ sequenceDiagram
     Child-->>SubprocessExec: JSON via stdout
     Note over Child: Process exits
     SubprocessExec-->>FastAPI: StepResult
-    FastAPI-->>Client: JSON response
+    FastAPI-->>Client: 202 Accepted, then status/transcripts
 ```
 
 **When to use:** Steps with untrusted tools, crash isolation needed, or resource-intensive operations.
@@ -127,8 +126,8 @@ sequenceDiagram
     participant Container as Sandbox Container
     participant LLM as OpenAI API
 
-    Client->>FastAPI: POST /agents/run
-    FastAPI->>SandboxExec: run(StepInput)
+    Client->>FastAPI: POST /v1/workflows/run (one step)
+    FastAPI->>SandboxExec: runner normalizes, run(step)
     SandboxExec->>Spawner: spawn(image, env, labels)
     Spawner->>Gateway: CreateSandbox
     Note over Gateway: Gateway's own compute driver<br/>(kubernetes or podman) decides<br/>how the sandbox is created --<br/>not something the client sends
@@ -151,7 +150,7 @@ sequenceDiagram
     SandboxExec->>Spawner: destroy(sandbox_name)
     Spawner->>Gateway: DeleteSandbox
     SandboxExec-->>FastAPI: StepResult
-    FastAPI-->>Client: JSON response
+    FastAPI-->>Client: 202 Accepted, then status/transcripts
 ```
 
 **When to use:** Full isolation needed, different agent SDK required, or agents with kubectl/filesystem access.
@@ -267,8 +266,7 @@ graph TB
 |---|---|---|
 | `/v1/query/direct` | POST | Blocking query via DirectExecutor |
 | `/v1/query/direct/stream` | POST | SSE streaming query |
-| `/v1/agents/run` | POST | Single agent execution (any spawn mode) |
-| `/v1/workflows/run` | POST | Start a multi-step workflow |
+| `/v1/workflows/run` | POST | Start a workflow (multi-step, or one-step for one-shot agent runs) |
 | `/v1/workflows/{id}` | GET | Get workflow status |
 | `/v1/workflows/{id}/approve` | POST | Approve a paused step |
 | `/v1/workflows/{id}/cancel` | POST | Cancel a workflow |
@@ -478,7 +476,6 @@ Blue = cloud-agents. Orange = lightspeed-stack. Red = final migration steps.
 | Component | Multi-pod safe? | Notes |
 |---|---|---|
 | `/query/direct` | Yes | Stateless per call |
-| `/agents/run` | Yes | Stateless per call |
 | Conversation state | Yes (PostgreSQL) | Shared database |
 | Workflow state | Yes (PostgreSQL) | Shared database |
 | Running workflow tasks | No (in-memory) | Use Temporal for crash recovery |

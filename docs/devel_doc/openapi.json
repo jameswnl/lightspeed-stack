@@ -11575,59 +11575,6 @@
                 }
             }
         },
-        "/v1/agents/run": {
-            "post": {
-                "tags": [
-                    "agents"
-                ],
-                "summary": "Run Agent Handler",
-                "description": "Execute a single agent with inline parameters.\n\nParameters:\n    request: FastAPI request (used by middleware).\n    body: Agent execution parameters.\n    auth: Authentication tuple (used by middleware).\n\nReturns:\n    Agent execution result with status, output, and transcript.",
-                "operationId": "run_agent_handler_v1_agents_run_post",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/AgentRunRequest"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "Agent execution result.",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "additionalProperties": true,
-                                    "type": "object",
-                                    "title": "Response Run Agent Handler V1 Agents Run Post"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized."
-                    },
-                    "403": {
-                        "description": "Forbidden."
-                    },
-                    "500": {
-                        "description": "Internal server error."
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/v1/workflows/run": {
             "post": {
                 "tags": [
@@ -12164,7 +12111,6 @@
                     "manage_prompts",
                     "read_prompts",
                     "manage_saved_prompts",
-                    "agent_run",
                     "workflow_start",
                     "workflow_view",
                     "workflow_approve",
@@ -12569,145 +12515,6 @@
                 ],
                 "title": "AgentProvider",
                 "description": "Represents the service provider of an agent."
-            },
-            "AgentRunRequest": {
-                "properties": {
-                    "prompt": {
-                        "type": "string",
-                        "title": "Prompt",
-                        "description": "The task prompt for the agent."
-                    },
-                    "instructions": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Instructions",
-                        "description": "System prompt / instructions for the agent."
-                    },
-                    "model": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Model",
-                        "description": "Full model ID (e.g. 'openai/gpt-4o'). Falls back to inference.default_model."
-                    },
-                    "provider": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Provider",
-                        "description": "Provider name. Used to prefix model if no slash present. Falls back to inference.default_provider."
-                    },
-                    "spawn": {
-                        "type": "string",
-                        "enum": [
-                            "none",
-                            "local",
-                            "ephemeral"
-                        ],
-                        "title": "Spawn",
-                        "description": "'none' runs in-process; 'local' spawns a subprocess; 'ephemeral' spawns a container.",
-                        "default": "none"
-                    },
-                    "sandbox_image": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Sandbox Image",
-                        "description": "Container image for spawn=ephemeral."
-                    },
-                    "tools": {
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array",
-                        "title": "Tools",
-                        "description": "Registered tool names for the agent to use."
-                    },
-                    "mcp_servers": {
-                        "anyOf": [
-                            {
-                                "items": {
-                                    "additionalProperties": true,
-                                    "type": "object"
-                                },
-                                "type": "array"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Mcp Servers",
-                        "description": "MCP server configs: [{name, url, headers}]. Each server is connected via pydantic-ai MCPToolset."
-                    },
-                    "allowed_skills": {
-                        "anyOf": [
-                            {
-                                "items": {
-                                    "type": "string"
-                                },
-                                "type": "array"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Allowed Skills",
-                        "description": "Skill allowlist: names of skill subdirectories the agent may use. For spawn=ephemeral the spawner materializes just this subset into the sandbox and Landlock-grants each /skills/<name> path, so unlisted skills are denied at the filesystem boundary. Omitted means no skills."
-                    },
-                    "output_schema": {
-                        "anyOf": [
-                            {
-                                "additionalProperties": true,
-                                "type": "object"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Output Schema",
-                        "description": "JSON Schema for structured output."
-                    },
-                    "context": {
-                        "anyOf": [
-                            {
-                                "additionalProperties": true,
-                                "type": "object"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Context",
-                        "description": "Prior context from previous steps or calls."
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "prompt"
-                ],
-                "title": "AgentRunRequest",
-                "description": "Request body for POST /v1/agents/run.\n\nAll agent parameters are passed inline \u2014 no registry lookup.\n\nAttributes:\n    prompt: The task prompt for the agent.\n    instructions: System prompt / instructions.\n    model: Full model ID (e.g. \"openai/gpt-4o\").\n    provider: Provider name (used with model if no slash in model).\n    spawn: Execution mode.\n    sandbox_image: Container image for spawn=ephemeral.\n    tools: Tool definitions.\n    mcp_servers: MCP server names.\n    allowed_skills: Skill allowlist (names of skill subdirectories).\n    output_schema: JSON Schema for structured output.\n    context: Prior context (e.g. from previous steps)."
             },
             "AgentSkill": {
                 "properties": {
@@ -21707,7 +21514,7 @@
                         "additionalProperties": true,
                         "type": "object",
                         "title": "Definition",
-                        "description": "Workflow definition with apiVersion, kind, metadata, spec."
+                        "description": "Workflow definition with apiVersion, kind, metadata, spec. A one-step workflow uses a single agent step named 'agent' with output_key 'result'."
                     },
                     "provider": {
                         "anyOf": [
@@ -21765,7 +21572,7 @@
                     "definition"
                 ],
                 "title": "RunWorkflowRequest",
-                "description": "Request body for POST /v1/workflows/run.\n\nAttributes:\n    definition: Workflow definition (same schema as cloud-agents YAML).\n    provider: Default LLM provider config for all steps.\n    sandbox_image: Default sandbox image for ephemeral steps.\n    approval_policy: Optional approval policy.\n    session_id: Optional caller-provided ID grouping related workflow runs."
+                "description": "Request body for POST /v1/workflows/run.\n\nA one-shot agent invocation is a one-step workflow: a definition with a\nsingle agent step using the ``agent`` / ``result`` naming convention.\nOne-step workflows take exactly the same path as multi-step workflows\n(normalization, executor selection, status, cancellation, transcripts,\npersistence).\n\nAttributes:\n    definition: Workflow definition (same schema as cloud-agents YAML).\n    provider: Default LLM provider config for all steps.\n    sandbox_image: Default sandbox image for ephemeral steps.\n    approval_policy: Optional approval policy.\n    session_id: Optional caller-provided ID grouping related workflow runs."
             },
             "SQLiteDatabaseConfiguration": {
                 "properties": {
@@ -24064,10 +23871,6 @@
         {
             "name": "a2a",
             "description": "Agent-to-Agent (A2A) protocol."
-        },
-        {
-            "name": "agents",
-            "description": "Agent execution."
         },
         {
             "name": "authorized",

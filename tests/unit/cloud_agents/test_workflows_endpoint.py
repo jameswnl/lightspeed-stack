@@ -150,6 +150,111 @@ class TestStartWorkflow:
         mock_executor.start.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_one_step_workflow_definition_forwarded(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A one-step workflow (one-shot agent run) forwards its definition as-is.
+
+        One-step workflows take the same start path as multi-step ones; the
+        handler does not special-case them.
+        """
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-oneshot"
+
+        definition = {
+            "apiVersion": "v1",
+            "kind": "AgentWorkflow",
+            "metadata": {"name": "one-shot-agent"},
+            "spec": {
+                "steps": [
+                    {
+                        "name": "agent",
+                        "type": "agent",
+                        "prompt": "Inspect the cluster",
+                        "output_key": "result",
+                        "spawn": "none",
+                    }
+                ]
+            },
+        }
+        body = RunWorkflowRequest(
+            definition=definition,
+            provider={"name": "openai", "model": "gpt-4o-mini"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        result = await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert result["workflow_id"] == "wf-oneshot"
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["definition"] == definition
+        assert workflow_input["provider"]["name"] == "openai"
+
+    @pytest.mark.asyncio
+    async def test_provider_falls_back_to_configured_defaults(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """An omitted provider falls back to inference.default_provider/model."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": []},
+            },
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["provider"]["name"] == "openai"
+        assert workflow_input["provider"]["model"] == "gpt-4o"
+        assert workflow_input["provider"]["credentials_secret"] == "OPENAI_API_KEY"
+
+    @pytest.mark.asyncio
+    async def test_explicit_provider_overrides_configured_defaults(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """An explicit request provider wins over inference defaults."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": []},
+            },
+            provider={"name": "anthropic", "model": "claude-sonnet-5"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["provider"]["name"] == "anthropic"
+        assert workflow_input["provider"]["model"] == "claude-sonnet-5"
+
+    @pytest.mark.asyncio
     async def test_credentials_secret_added_for_known_provider(
         self,
         mocker: MockerFixture,

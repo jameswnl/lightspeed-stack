@@ -1316,9 +1316,6 @@ class Action(str, Enum):
     # User saved prompts (/v1/saved-prompts)
     MANAGE_SAVED_PROMPTS = "manage_saved_prompts"
 
-    # Agent execution (/v1/agents)
-    AGENT_RUN = "agent_run"
-
     # Workflow operations (/v1/workflows)
     WORKFLOW_START = "workflow_start"
     WORKFLOW_VIEW = "workflow_view"

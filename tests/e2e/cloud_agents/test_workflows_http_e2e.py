@@ -1,9 +1,9 @@
 """Real HTTP e2e tests for POST /v1/workflows/*.
 
 Companion automated coverage for docs/cloud-agents-demo-curl.sh's
-workflow-ephemeral-approval / workflow-none-approval / workflow-local /
-workflow-ephemeral scenarios -- exercises workflow run/approve/transcripts
-across all three spawn
+oneshot-none / workflow-ephemeral-approval / workflow-none-approval /
+workflow-local / workflow-ephemeral scenarios -- exercises workflow
+run/approve/transcripts across all three spawn
 modes, with and without a human-approval gate, through the actual FastAPI
 app over real HTTP (real routing, real auth dependency resolution, real
 request/response validation), unlike test_workflow_definitions_e2e.py
@@ -29,6 +29,8 @@ Usage:
     cd ~/ws/local-infra && make up   # provides Postgres on localhost:5432
     uv run pytest tests/e2e/cloud_agents/test_workflows_http_e2e.py -v
 """
+
+# pylint: disable=too-few-public-methods
 
 from __future__ import annotations
 
@@ -374,3 +376,69 @@ class TestWorkflowHttpE2E:
         )
         assert completed["status"] == "completed"
         assert "investigate_result" in completed["steps"]
+
+
+class TestOneStepWorkflowHttpE2E:
+    """A one-step workflow (one-shot agent run) over real HTTP.
+
+    POST /v1/workflows/run is the only agent execution endpoint: the
+    former standalone agent run is submitted as a single-step workflow
+    using the documented ``agent`` / ``result`` naming convention, with a
+    run-level provider. Uses the issue-#55 migration-example shape.
+    """
+
+    def test_one_step_workflow_completes(self, http_client: TestClient) -> None:
+        """One-step spawn:none workflow completes with schema-conforming output."""
+        start_response = http_client.post(
+            "/v1/workflows/run",
+            json={
+                "definition": {
+                    "apiVersion": "v1",
+                    "kind": "AgentWorkflow",
+                    "metadata": {"name": "one-shot-agent"},
+                    "spec": {
+                        "steps": [
+                            {
+                                "name": "agent",
+                                "type": "agent",
+                                "spawn": "none",
+                                "output_key": "result",
+                                "prompt": (
+                                    "Is pod checkout-7f9 healthy? Assume yes, "
+                                    "everything is fine."
+                                ),
+                                "output_schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "healthy": {"type": "boolean"},
+                                        "reason": {"type": "string"},
+                                    },
+                                    "required": ["healthy", "reason"],
+                                },
+                                "timeout_seconds": 120,
+                            },
+                        ]
+                    },
+                },
+                "provider": {"name": "openai", "model": "gpt-4o-mini"},
+            },
+        )
+
+        assert start_response.status_code == 202
+        workflow_id = start_response.json()["workflow_id"]
+        assert workflow_id
+
+        completed = wait_for_status(
+            http_client,
+            workflow_id,
+            lambda body: bool(body["is_terminal"]),
+            timeout_s=150,
+        )
+        assert completed["status"] == "completed"
+        assert "result" in completed["steps"]
+
+        transcripts_response = http_client.get(
+            f"/v1/workflows/{workflow_id}/transcripts"
+        )
+        assert transcripts_response.status_code == 200
+        assert "result" in transcripts_response.json()["transcripts"]

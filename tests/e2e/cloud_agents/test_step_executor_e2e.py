@@ -2,8 +2,8 @@
 
 Calls `get_step_executor(...).run(...)`/`.run_stream(...)` (or, for
 ephemeral, `cloud_agents.workflow.core.step_runner.run_step(...)`)
-directly -- bypassing the `/v1/agents/run` handler and FastAPI routing
-entirely, one layer below test_agents_run_handler_e2e.py. See
+directly -- bypassing the workflow engine, the `/v1/workflows/run`
+handler, and FastAPI routing entirely. See
 test_workflow_definitions_e2e.py for the same layer applied to a full
 multi-step workflow YAML instead of a single step.
 

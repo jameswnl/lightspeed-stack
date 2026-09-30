@@ -379,6 +379,32 @@ class TestStartWorkflow:
         mock_executor.start.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_unapproved_run_provider_rejected_with_422(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A run provider outside the approved contract is rejected before start."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+
+        body = RunWorkflowRequest(
+            definition=_valid_definition(),
+            provider={"name": "bogus", "model": "x"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert exc_info.value.status_code == 422
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_unknown_step_type_rejected_with_422(
         self,
         mocker: MockerFixture,

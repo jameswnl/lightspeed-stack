@@ -4,11 +4,13 @@
 
 An audit of `tests/e2e/cloud_agents/` found real coverage gaps across the
 two cloud-agents HTTP endpoints, `/v1/agents/run` and `/v1/workflows/*`,
-crossed with the three spawn modes:
+crossed with the three spawn modes. `/v1/agents/run` was later removed
+(jameswnl/lightspeed-stack#55) and its coverage migrated to one-step
+workflow tests -- the table below is the historical audit record:
 
 | Endpoint | none | local | ephemeral |
 |---|---|---|---|
-| `/v1/agents/run` | HTTP-tested | not a valid API value (`AgentRunRequest.spawn: Literal["none","ephemeral"]`) | only handler-direct, bypassing HTTP routing/auth |
+| `/v1/agents/run` (removed in #55) | HTTP-tested | not a valid API value (`AgentRunRequest.spawn: Literal["none","ephemeral"]`) | only handler-direct, bypassing HTTP routing/auth |
 | `/v1/workflows/run` | HTTP-tested | zero coverage | zero coverage |
 
 None of `tests/e2e/cloud_agents/` ran in CI (`.github/workflows/cloud_agents_tests.yaml`
@@ -17,7 +19,9 @@ a real `OPENAI_API_KEY` against real OpenAI.
 
 **Update:** `/v1/agents/run`'s `local` gap above was closed after this audit --
 `AgentRunRequest.spawn` now accepts `Literal["none","local","ephemeral"]`,
-HTTP-tested in `test_agents_run_http_e2e.py::test_local_spawn_agent_run`. Note
+HTTP-tested in `test_agents_run_http_e2e.py::test_local_spawn_agent_run`
+(that file was removed in #55; the equivalent coverage is now
+`test_workflows_http_e2e.py::test_workflow_with_local_spawn_step`). Note
 that test omits `output_schema`: the cloud-agents `SubprocessExecutor` behind
 `spawn:local` has no native structured-output mode yet
 (jameswnl/lightspeed-cloud-agents#235), so it can't reliably guarantee
@@ -45,7 +49,9 @@ missing functionality. `test_workflows_http_e2e.py` gained
 `test_workflow_with_ephemeral_spawn_step` accordingly, and
 `test_agents_run_http_e2e.py::TestAgentRunHttpE2E` gained
 `test_ephemeral_agent_run` to cover the last real gap (agents×ephemeral
-had only handler-direct coverage before).
+had only handler-direct coverage before). In #55 the agents HTTP file was
+removed and one-shot coverage moved into `test_workflows_http_e2e.py` as
+one-step workflow tests.
 
 (These two files started as one combined `test_agents_workflow_http_e2e.py`
 and were later split by endpoint as part of a broader
@@ -88,7 +94,7 @@ as before; set (what CI does), `OPENAI_BASE_URL` is redirected to the
 mock for the session.
 
 **Scope warning:** this only applies safely to
-`test_agents_run_http_e2e.py`/`test_workflows_http_e2e.py` (plus the mock's own self-tests) —
+`test_workflows_http_e2e.py` (plus the mock's own self-tests) —
 every other file in `tests/e2e/cloud_agents/` asserts real-world semantic
 LLM content (e.g. `"paris" in output`) that only a real model can produce,
 and fails confusingly (not due to a real bug) if run with the mock
@@ -116,7 +122,7 @@ Registered in `pyproject.toml` and applied to every ephemeral-gated test
 
 `lightspeed-stack-harness.yaml` had no `spawner:` section at all, which
 meant `spawn=ephemeral` would 400 against a server started with it —
-including `docs/cloud-agents-demo-curl.sh`'s `agent-ephemeral` scenario,
+including `docs/cloud-agents-demo-curl.sh`'s `oneshot-ephemeral` scenario,
 which already documented an ephemeral flow that couldn't have worked. Added:
 
 ```yaml
@@ -137,7 +143,7 @@ automatically on every push/PR to `harness` (same trigger as the existing
 unit/integration job): a `postgres:16` service matching the harness
 config's credentials, `OPENAI_API_KEY=sk-mock-ci-key` +
 `LIGHTSPEED_E2E_USE_MOCK_LLM=1`, running
-`test_agents_run_http_e2e.py` and `test_workflows_http_e2e.py` plus the mock's own self-tests with
+`test_workflows_http_e2e.py` plus the mock's own self-tests with
 `-m "not ephemeral"`.
 
 ## File organization by testing layer
@@ -152,9 +158,7 @@ name in two different files). Current layout:
 
 | File | Layer | Covers |
 |---|---|---|
-| `test_agents_run_http_e2e.py` | real HTTP (`TestClient`) | `/v1/agents/run`, spawn none+local+ephemeral |
-| `test_workflows_http_e2e.py` | real HTTP (`TestClient`) | `/v1/workflows/*`, spawn none+local+ephemeral |
-| `test_agents_run_handler_e2e.py` | handler-direct (`handler.__wrapped__(...)`) | `/v1/agents/run`, spawn none+local+ephemeral |
+| `test_workflows_http_e2e.py` | real HTTP (`TestClient`) | `/v1/workflows/*`, spawn none+local+ephemeral, incl. one-step workflows |
 | `test_query_direct_handler_e2e.py` | handler-direct | `/v1/query/direct` error paths |
 | `test_step_executor_e2e.py` | step-executor dispatch (`get_step_executor(...).run(...)`) | single-step execution, spawn none+local+ephemeral |
 | `test_workflow_definitions_e2e.py` | step-executor dispatch | full workflow-YAML execution, one step-executor call per step |

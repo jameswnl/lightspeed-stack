@@ -72,8 +72,8 @@ svg { width: 100%; height: auto; display: block; }
 <div class="tabs">
   <button class="active" onclick="switchTab('growth')">Growth Strategy</button>
   <button onclick="switchTab('blocks')">Building Blocks</button>
-  <button onclick="switchTab('none')">1. Agent — In-Process</button>
-  <button onclick="switchTab('eph')">2. Agent — OpenShell</button>
+  <button onclick="switchTab('none')">1. One-Step — In-Process</button>
+  <button onclick="switchTab('eph')">2. One-Step — OpenShell</button>
   <button onclick="switchTab('wf')">3. Workflow — OpenShell</button>
 </div>
 <div class="tab-divider"></div>
@@ -197,7 +197,7 @@ svg { width: 100%; height: auto; display: block; }
 <!-- TAB 1: SINGLE AGENT — IN-PROCESS (spawn: none)                -->
 <!-- ============================================================ -->
 <div id="tab-none" class="tab-content">
-<h2>POST /v1/agents/run, spawn: "none" — the agent runs in-process. Same agent loop (LLM + MCP tools + skills) used by every spawn mode.</h2>
+<h2>POST /v1/workflows/run with a one-step workflow, spawn: "none" — the agent runs in-process. Same agent loop (LLM + MCP tools + skills) used by every spawn mode.</h2>
 
 <div class="scene">
 <svg viewBox="0 0 1140 520" xmlns="http://www.w3.org/2000/svg">
@@ -215,7 +215,7 @@ svg { width: 100%; height: auto; display: block; }
 
 <g class="comp"><rect x="15" y="225" width="110" height="60" fill="#1f2937" stroke="#6366f1"/><text x="70" y="250" text-anchor="middle" class="lbl">Client</text><text x="70" y="266" text-anchor="middle" class="desc">API caller</text></g>
 
-<g class="comp"><rect x="160" y="205" width="190" height="100" fill="#1c2333" stroke="#58a6ff"/><text x="255" y="228" text-anchor="middle" class="lbl">API</text><text x="255" y="244" text-anchor="middle" class="desc">POST /v1/agents/run</text><text x="255" y="258" text-anchor="middle" class="desc">validates request,</text><text x="255" y="271" text-anchor="middle" class="desc">dispatches by spawn mode</text><text x="255" y="288" text-anchor="middle" class="param">spawn: "none"</text></g>
+<g class="comp"><rect x="160" y="205" width="190" height="100" fill="#1c2333" stroke="#58a6ff"/><text x="255" y="228" text-anchor="middle" class="lbl">API</text><text x="255" y="244" text-anchor="middle" class="desc">POST /v1/workflows/run</text><text x="255" y="258" text-anchor="middle" class="desc">one-step workflow,</text><text x="255" y="271" text-anchor="middle" class="desc">dispatches by spawn mode</text><text x="255" y="288" text-anchor="middle" class="param">spawn: "none"</text></g>
 
 <g class="comp" id="n-skills"><rect x="620" y="90" width="170" height="60" fill="#1c2333" stroke="#d29922"/><text x="705" y="113" text-anchor="middle" class="lbl">Skills</text><text x="705" y="129" text-anchor="middle" class="desc">SKILL.md → system prompt</text></g>
 
@@ -253,7 +253,7 @@ svg { width: 100%; height: auto; display: block; }
 <!-- TAB 2: SINGLE AGENT — OPENSHELL (spawn: ephemeral)            -->
 <!-- ============================================================ -->
 <div id="tab-eph" class="tab-content">
-<h2>Same request, same agent loop, same output shape — POST /v1/agents/run, spawn: "ephemeral". The difference is entirely underneath: a gateway-mediated, hardened sandbox instead of the API process.</h2>
+<h2>Same one-step workflow, same agent loop, same output — POST /v1/workflows/run, spawn: "ephemeral". The difference is entirely underneath: a gateway-mediated, hardened sandbox instead of the API process.</h2>
 
 <div class="scene">
 <svg viewBox="0 0 1140 560" xmlns="http://www.w3.org/2000/svg">
@@ -277,7 +277,7 @@ svg { width: 100%; height: auto; display: block; }
 
 <g class="comp"><rect x="15" y="245" width="110" height="60" fill="#1f2937" stroke="#6366f1"/><text x="70" y="270" text-anchor="middle" class="lbl">Client</text><text x="70" y="286" text-anchor="middle" class="desc">API caller</text></g>
 
-<g class="comp"><rect x="160" y="225" width="190" height="100" fill="#1c2333" stroke="#58a6ff"/><text x="255" y="248" text-anchor="middle" class="lbl">API</text><text x="255" y="264" text-anchor="middle" class="desc">POST /v1/agents/run</text><text x="255" y="278" text-anchor="middle" class="desc">dispatches by spawn mode</text><text x="255" y="291" text-anchor="middle" class="desc">same request shape as Tab 1</text><text x="255" y="308" text-anchor="middle" class="param">spawn: "ephemeral"</text></g>
+<g class="comp"><rect x="160" y="225" width="190" height="100" fill="#1c2333" stroke="#58a6ff"/><text x="255" y="248" text-anchor="middle" class="lbl">API</text><text x="255" y="264" text-anchor="middle" class="desc">POST /v1/workflows/run</text><text x="255" y="278" text-anchor="middle" class="desc">dispatches by spawn mode</text><text x="255" y="291" text-anchor="middle" class="desc">same one-step shape as Tab 1</text><text x="255" y="308" text-anchor="middle" class="param">spawn: "ephemeral"</text></g>
 
 <g class="comp"><rect x="580" y="235" width="105" height="80" fill="#1c1030" stroke="#a371f7"/><text x="632" y="258" text-anchor="middle" class="lbl" fill="#d2a8ff">Gateway</text><text x="632" y="274" text-anchor="middle" class="desc">gRPC: CreateSandbox</text><text x="632" y="288" text-anchor="middle" class="desc">issues per-sandbox JWT</text></g>
 
@@ -318,7 +318,7 @@ svg { width: 100%; height: auto; display: block; }
 <!-- TAB 3: MULTI-STEP WORKFLOW — OPENSHELL                        -->
 <!-- ============================================================ -->
 <div id="tab-wf" class="tab-content">
-<h2>POST /v1/workflows/run — a workflow is a graph of steps, and each step is exactly the single-agent-invocation from Tab 2. The workflow runner owns sequencing, context-passing, and approval gates; it does not re-implement the agent loop.</h2>
+<h2>POST /v1/workflows/run — a workflow is a graph of steps, and each step is exactly the one-step invocation from Tab 2. The workflow runner owns sequencing, context-passing, and approval gates; it does not re-implement the agent loop.</h2>
 
 <div class="scene">
 <svg viewBox="0 0 1140 560" xmlns="http://www.w3.org/2000/svg">
@@ -454,9 +454,9 @@ function createPlayer(prefix, tabId, showIds, steps, opts) {
 
 const N = createPlayer('n-', 'tab-none', ['n-skills'], [
   { t: 'Client sends the request — params visible in full', on: ['n-f1'],
-    log: '<span class="ls">→ POST /v1/agents/run</span>\n{\n  "prompt": "Is pod checkout-7f9 healthy?",\n  "spawn": "none",\n  "tools": ["get_pod_status"],\n  "mcp_servers": ["kubectl-mcp"],\n  "skills_paths": ["/skills/k8s-triage"],\n  "output_schema": {"healthy": "bool", "reason": "string"}\n}' },
+    log: '<span class="ls">→ POST /v1/workflows/run</span>\n{\n  "definition": {"spec": {"steps": [\n    {"name": "agent", "spawn": "none", "output_key": "result",\n     "tools": ["get_pod_status"], "mcp_servers": ["kubectl-mcp"]}\n  ]}},\n  "provider": {"name": "openai", "model": "gpt-4o-mini"}\n}' },
   { t: 'lightspeed-stack dispatches by spawn mode', on: ['n-f2'],
-    log: '<span class="ls">→ spawn: "none"</span> → get_step_executor() returns <span class="ld">DirectExecutor</span>' },
+    log: '<span class="ls">→ one-step workflow</span> → runner normalizes → <span class="ld">DirectExecutor</span>' },
   { t: 'DirectExecutor builds the agent: loads skills + tools + MCP', on: ['n-f3'], show: ['n-skills'],
     log: '<span class="ld">⚙ Agent("openai:gpt-4o-mini")</span>\n  system_prompt += SKILL.md content (k8s-triage)\n  tools: [get_pod_status] + MCPToolset(kubectl-mcp)' },
   { t: 'Agent loop, turn 1 — inference call', on: ['n-f4'],
@@ -467,15 +467,15 @@ const N = createPlayer('n-', 'tab-none', ['n-skills'], [
     log: '<span class="ld">→ MCP kubectl-mcp:</span> get_pod_status(...)\n<span class="ld">← result:</span> {status:"CrashLoopBackOff", restarts:14}' },
   { t: 'Agent loop, turn 2 — inference with tool result', on: ['n-f8'],
     log: '<span class="lp">→ LLM inference</span> (with tool result)\n<span class="lp">← structured output:</span> {healthy:false, reason:"CrashLoopBackOff", restarts:14}' },
-  { t: 'Result returns to the client', on: ['n-f9', 'n-f10'],
-    log: '<span class="ls">← StepResult</span> {status:"completed", input_tokens:412, output_tokens:38}\n<span class="ls">← 200 OK</span> to client' },
+  { t: 'Run completes — client reads status and transcript', on: ['n-f9', 'n-f10'],
+    log: '<span class="ls">← 202 Accepted</span> {workflow_id}\n<span class="ls">← GET status/transcripts</span> {status:"completed", tokens:{in:412, out:38}}' },
 ]);
 
 const E = createPlayer('e-', 'tab-eph', ['e-sandbound', 'e-sandlbl', 'e-skills', 'e-agent'], [
   { t: 'Client sends the same shape of request — only spawn differs', on: ['e-f1'],
-    log: '<span class="ls">→ POST /v1/agents/run</span>\n{\n  "prompt": "Is pod checkout-7f9 healthy?",\n  "spawn": "ephemeral",\n  "tools": ["get_pod_status"],\n  "mcp_servers": ["kubectl-mcp"],\n  "skills_image": "registry/skills:v1",\n  "sandbox_image": "lightspeed-agentic-sandbox:latest"\n}' },
+    log: '<span class="ls">→ POST /v1/workflows/run</span>\n{\n  "definition": {"spec": {"steps": [\n    {"name": "agent", "spawn": "ephemeral", "output_key": "result",\n     "allowed_skills": ["k8s-diag"]}\n  ]}},\n  "provider": {"name": "openai", "model": "gpt-4o-mini"},\n  "sandbox_image": "lightspeed-agentic-sandbox:latest"\n}' },
   { t: 'lightspeed-stack dispatches by spawn mode', on: ['e-f2'],
-    log: '<span class="ls">→ spawn: "ephemeral"</span> → get_step_executor() returns <span class="lw">SandboxExecutor</span>' },
+    log: '<span class="ls">→ one-step workflow</span> → runner normalizes → <span class="lw">SandboxExecutor</span>' },
   { t: 'SandboxExecutor builds a spawner from config', on: ['e-f3'],
     log: '<span class="lw">⚙ spawner_factory.build_spawner("openshell", ...)</span> → OpenShellSpawner (gRPC client)' },
   { t: 'Spawner asks the gateway to create a sandbox', show: ['e-sandbound', 'e-sandlbl'],
@@ -491,7 +491,7 @@ const E = createPlayer('e-', 'tab-eph', ['e-sandbound', 'e-sandlbl', 'e-skills',
   { t: 'Agent loop, turn 2 — final structured answer', on: ['e-f6', 'e-f7'],
     log: '<span class="lp">← structured output:</span> {healthy:false, reason:"CrashLoopBackOff", restarts:14}' },
   { t: 'Transcript pulled, sandbox destroyed, result returned', on: ['e-f5', 'e-f4', 'e-f3', 'e-f2', 'e-f1'], hide: ['e-sandbound', 'e-sandlbl', 'e-skills', 'e-agent'],
-    log: '<span class="ld">→ GET /v1/agent/events</span> (transcript)\n<span class="le">↓ DeleteSandbox</span> — container destroyed\n<span class="ls">← 200 OK</span> to client — identical response shape to Tab 1' },
+    log: '<span class="ld">→ GET /v1/agent/events</span> (transcript)\n<span class="le">↓ DeleteSandbox</span> — container destroyed\n<span class="ls">← run completes</span> — same status/transcript APIs as Tab 1' },
 ]);
 
 const W = createPlayer('w-', 'tab-wf', ['w-step', 'w-sandbound', 'w-sandlbl'], [

@@ -1,41 +1,45 @@
 #!/usr/bin/env bash
-# Live-demo curl commands covering the full /v1/agents/run and
-# /v1/workflows/run endpoint x spawn-mode matrix, matching
-# tests/e2e/cloud_agents/test_agents_run_http_e2e.py and
-# test_workflows_http_e2e.py.
+# Live-demo curl commands covering the /v1/workflows/run spawn-mode
+# matrix, matching tests/e2e/cloud_agents/test_workflows_http_e2e.py.
+# POST /v1/workflows/run is the only agent execution endpoint: a one-shot
+# agent invocation is a one-step workflow (the oneshot-* scenarios below
+# use the documented agent/result naming convention with a run-level
+# provider).
 #
-# agent-none / agent-ephemeral / workflow-ephemeral-approval illustrate
-# the three tabs in docs/cloud-agents-integration.html. The rest
-# (agent-local, workflow-none-approval, workflow-local, workflow-ephemeral)
-# round out the same matrix for parity with the automated e2e suite --
-# they aren't part of that illustration, just additional scenarios:
-#   agent-none                 POST /v1/agents/run,    spawn: "none"
-#   agent-local                 POST /v1/agents/run,    spawn: "local"
-#   agent-ephemeral             POST /v1/agents/run,    spawn: "ephemeral", k8s-diag skill + Landlock demo
-#   workflow-ephemeral-approval POST /v1/workflows/run, spawn: "ephemeral", multi-step + approval
-#   workflow-none-approval      POST /v1/workflows/run, spawn: "none",      multi-step + approval
-#   workflow-local               POST /v1/workflows/run, spawn: "local",     single step
-#   workflow-ephemeral           POST /v1/workflows/run, spawn: "ephemeral", single step, no approval
+# oneshot-none / oneshot-ephemeral / workflow-ephemeral-approval
+# illustrate the three tabs in docs/cloud-agents-integration.html. The
+# rest (oneshot-local, workflow-none-approval, workflow-local,
+# workflow-ephemeral) round out the same matrix for parity with the
+# automated e2e suite -- they aren't part of that illustration, just
+# additional scenarios:
+#   oneshot-none               one-step workflow, spawn: "none"
+#   oneshot-local               one-step workflow, spawn: "local"
+#   oneshot-ephemeral           one-step workflow, spawn: "ephemeral", k8s-diag skill + Landlock demo
+#   workflow-ephemeral-approval multi-step + approval, spawn: "ephemeral"
+#   workflow-none-approval      multi-step + approval, spawn: "none"
+#   workflow-local               single step, spawn: "local", no approval
+#   workflow-ephemeral           single step, spawn: "ephemeral", no approval
 #
-# Note: agent-local and workflow-local omit output_schema -- the
+# Note: oneshot-local and workflow-local omit output_schema -- the
 # cloud-agents SubprocessExecutor behind spawn:local has no native
 # structured-output mode yet (jameswnl/lightspeed-cloud-agents#235), so
 # it can't reliably guarantee schema-conforming JSON the way spawn:none
 # and spawn:ephemeral can.
 #
-# MCP server reachability: agent-none and agent-local run in-process on
-# this machine, not inside the cluster, so they reach the mock pod-status
-# MCP server (deployed via ~/ws/local-infra's ocp-prod-mcp-pod-status-*
-# targets) at localhost:8084 -- port-forward it first:
+# MCP server reachability: oneshot-none and oneshot-local run in-process
+# on this machine, not inside the cluster, so they reach the mock
+# pod-status MCP server (deployed via ~/ws/local-infra's
+# ocp-prod-mcp-pod-status-* targets) at localhost:8084 -- port-forward
+# it first:
 #   oc -n openshell-prod port-forward svc/mcp-pod-status-mock 8084:8084
-# agent-ephemeral runs inside an OpenShell sandbox pod on the cluster, so
-# it reaches the same service via in-cluster DNS instead
+# oneshot-ephemeral runs inside an OpenShell sandbox pod on the cluster,
+# so it reaches the same service via in-cluster DNS instead
 # (mcp-pod-status-mock:8084), no port-forward needed.
 #
 # Usage:
-#   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-none
-#   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-local
-#   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-ephemeral
+#   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh oneshot-none
+#   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh oneshot-local
+#   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh oneshot-ephemeral
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh workflow-ephemeral-approval
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh workflow-none-approval
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh workflow-local
@@ -63,33 +67,44 @@ discover() {
   curl -s "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/mcp-servers" | jq
 }
 
-run_agent() {
-  # POST an /v1/agents/run payload, pretty-print the body, and fail on
-  # HTTP >= 400. $1: title line, $2: spawn mode, $3: prompt, $4: extra
-  # JSON object merged onto the shared {prompt, spawn, provider, model}
-  # base -- callers only spell out what differs per spawn mode.
-  local title="$1" spawn="$2" prompt="$3" extra="{}"
+oneshot_workflow_payload() {
+  # One-step workflow definition shared by the oneshot-* demos: a single
+  # agent step using the documented agent/result naming convention, plus
+  # a run-level provider. $1: spawn mode, $2: workflow name, $3: prompt,
+  # $4: extra JSON object merged onto the step -- callers only spell out
+  # what differs per spawn mode.
+  local extra="{}"
   if [[ $# -ge 4 ]]; then
     extra="$4"
   fi
-  echo "$title"
-  local payload resp status
-  payload=$(jq -n \
-    --arg prompt "$prompt" \
-    --arg spawn "$spawn" \
+  jq -n \
+    --arg spawn "$1" \
+    --arg name "$2" \
+    --arg prompt "$3" \
     --argjson extra "$extra" \
-    '{prompt: $prompt, spawn: $spawn, provider: "openai", model: "gpt-5-mini"} + $extra')
-  resp=$(curl -s -w '\n%{http_code}' -X POST "$BASE_URL/v1/agents/run" \
-    "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
-    -H "Content-Type: application/json" \
-    -d "$payload")
-  status="${resp##*$'\n'}"
-  echo "${resp%$'\n'*}" | jq
-  [[ "$status" -lt 400 ]]
+    '{
+      "definition": {
+        "apiVersion": "v1",
+        "kind": "AgentWorkflow",
+        "metadata": {"name": $name},
+        "spec": {
+          "steps": [
+            {
+              "name": "agent", "type": "agent", "spawn": $spawn,
+              "output_key": "result",
+              "prompt": $prompt,
+              "timeout_seconds": 120
+            } + $extra
+          ]
+        }
+      },
+      "provider": {"name": "openai", "model": "gpt-5-mini"}
+    }'
 }
 
-agent_none() {
-  run_agent "== Agent — In-Process (spawn: none) ==" "none" \
+oneshot_none() {
+  echo "== One-shot one-step workflow — In-Process (spawn: none) =="
+  submit_workflow "$(oneshot_workflow_payload "none" "oneshot-none-demo" \
     "Is pod checkout-7f9 healthy?" \
     '{
       "tools": [],
@@ -99,24 +114,29 @@ agent_none() {
         "properties": { "healthy": {"type": "boolean"}, "reason": {"type": "string"} },
         "required": ["healthy", "reason"]
       }
-    }'
+    }')"
+  finish_workflow "$WF_ID" 60
 }
 
-agent_local() {
-  run_agent "== Agent — Subprocess (spawn: local) ==" "local" \
+oneshot_local() {
+  echo "== One-shot one-step workflow — Subprocess (spawn: local) =="
+  submit_workflow "$(oneshot_workflow_payload "local" "oneshot-local-demo" \
     "Check whether pod checkout-7f9 is healthy and say one sentence confirming the result." \
-    '{"tools": [], "mcp_servers": [{"name": "kubectl-mcp", "url": "http://localhost:8084/mcp"}]}'
+    '{"tools": [], "mcp_servers": [{"name": "kubectl-mcp", "url": "http://localhost:8084/mcp"}]}')"
+  finish_workflow "$WF_ID" 150
 }
 
-agent_ephemeral() {
+oneshot_ephemeral() {
   # allowed_skills=["k8s-diag"]: the spawner materializes just that skill
   # into the sandbox and Landlock-grants /skills/k8s-diag, so the prompt
   # below demonstrates both sides -- the allowed skill works, and reading
   # an unlisted skill (/skills/security-audit) is denied at the filesystem
   # boundary. Requires those skills baked into the sandbox image (/skills).
-  run_agent "== Agent — OpenShell (spawn: ephemeral, k8s-diag skill + Landlock) ==" "ephemeral" \
+  echo "== One-shot one-step workflow — OpenShell (spawn: ephemeral, k8s-diag skill + Landlock) =="
+  submit_workflow "$(oneshot_workflow_payload "ephemeral" "oneshot-ephemeral-demo" \
     "Use the k8s-diag skill to check whether pod checkout-7f9 is healthy. Then try reading /skills/security-audit/SKILL.md and report whether that read succeeded or was denied, and why." \
-    '{"mcp_servers": [{"name": "kubectl-mcp", "url": "http://mcp-pod-status-mock:8084/mcp"}], "provider": "openai", "model": "gpt-5-mini"}'
+    '{"mcp_servers": [{"name": "kubectl-mcp", "url": "http://mcp-pod-status-mock:8084/mcp"}], "allowed_skills": ["k8s-diag"]}')"
+  finish_workflow "$WF_ID" 150
 }
 
 wait_for_status() {
@@ -309,15 +329,15 @@ workflow_ephemeral() {
 
 case "${1:-}" in
   discover) discover ;;
-  agent-none) agent_none ;;
-  agent-local) agent_local ;;
-  agent-ephemeral) agent_ephemeral ;;
+  oneshot-none) oneshot_none ;;
+  oneshot-local) oneshot_local ;;
+  oneshot-ephemeral) oneshot_ephemeral ;;
   workflow-ephemeral-approval) workflow_ephemeral_approval ;;
   workflow-none-approval) workflow_none_approval ;;
   workflow-local) workflow_local ;;
   workflow-ephemeral) workflow_ephemeral ;;
   *)
-    echo "Usage: $0 {discover|agent-none|agent-local|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral}" >&2
+    echo "Usage: $0 {discover|oneshot-none|oneshot-local|oneshot-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral}" >&2
     exit 1
     ;;
 esac

@@ -6,7 +6,6 @@ from app.endpoints import (
     # A2A (Agent-to-Agent) protocol support
     a2a,
     agent_tools,
-    agents,
     authorized,
     config,
     conversations_v1,
@@ -84,9 +83,9 @@ def include_routers(app: FastAPI) -> None:
     app.include_router(authorized.router)
     app.include_router(metrics.router)
 
-    # Agent execution and workflow orchestration
+    # Agent tools and workflow orchestration (POST /v1/workflows/run is
+    # the only agent execution endpoint; one-shot runs are one-step workflows)
     app.include_router(agent_tools.router, prefix="/v1")
-    app.include_router(agents.router, prefix="/v1")
     app.include_router(workflows.router, prefix="/v1")
 
     # A2A (Agent-to-Agent) protocol endpoint

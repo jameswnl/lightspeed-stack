@@ -4,7 +4,14 @@
 
 from typing import Annotated, Any
 
+from cloud_agents.workflow.core.definition import WorkflowDefinition
+from cloud_agents.workflow.core.execution import (
+    inference_spec_from_provider_config,
+    validate_credential_reference,
+)
+from cloud_agents.workflow.core.validation import validate_definition
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import ValidationError
 
 from authentication import get_auth_dependency
 from authentication.interface import AuthTuple
@@ -51,6 +58,56 @@ def _get_executor() -> Any:
     return _executor
 
 
+def _validate_workflow_submission(
+    definition: dict[str, Any], provider: dict[str, Any]
+) -> None:
+    """Reject invalid workflow input with 422 before the run is persisted.
+
+    Mirrors cloud-agents' own local/api.py submission gate: the definition
+    must pass cloud-agents validation and model validation, and the
+    run-level provider must be an approved executor-known provider whose
+    credentials_secret (when present) is a reference, never a value.
+
+    Parameters:
+        definition: Raw workflow definition from the request body.
+        provider: Merged run-level provider (request value or inference
+            defaults, with credentials_secret injected).
+
+    Raises:
+        HTTPException: 422 with a ``validation_errors`` detail list when
+            any check fails.
+    """
+    definition_errors = validate_definition(definition)
+    if definition_errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"validation_errors": definition_errors},
+        )
+    try:
+        WorkflowDefinition.model_validate(definition)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"validation_errors": [str(exc)]},
+        ) from exc
+    try:
+        inference_spec_from_provider_config(provider)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"validation_errors": [f"provider: {exc}"]},
+        ) from exc
+    run_credentials_secret = provider.get("credentials_secret")
+    if run_credentials_secret is not None:
+        try:
+            validate_credential_reference(run_credentials_secret)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"validation_errors": [f"provider: {exc}"]},
+            ) from exc
+
+
 @router.post(
     "/workflows/run",
     status_code=status.HTTP_202_ACCEPTED,
@@ -86,6 +143,13 @@ async def start_workflow_handler(
         cred_secret = credentials_secret_for(provider.get("name") or "")
         if cred_secret:
             provider["credentials_secret"] = cred_secret
+
+    # Submission-time gate (issue #55): LocalWorkflowRunner.start persists
+    # the raw definition and provider BEFORE build_graph/normalization
+    # runs, so secret-bearing, malformed, or unapproved-provider input
+    # must be rejected here -- otherwise it returns 202 and lands in
+    # workflow state first.
+    _validate_workflow_submission(body.definition, provider)
 
     spawner_config = configuration.spawner_configuration
     default_sandbox_image = (

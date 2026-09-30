@@ -172,7 +172,7 @@ test-e2e-tagged: ## Run e2e tests with E2E_BEHAVE_TAG_EXPR (default: all @cfg_*)
 test-e2e-tagged-local: ## Same as test-e2e-tagged without script wrapper
 	uv run behave --color --format pretty --tags="$(E2E_BEHAVE_TAG_EXPR)" -D dump_errors=true @tests/e2e/test_list.txt
 
-test-e2e-agents-workflows: ## Real-HTTP e2e tests for /v1/agents/run and /v1/workflows/* (needs OPENAI_API_KEY)
+test-e2e-agents-workflows: ## Real-HTTP e2e tests for /v1/workflows/* incl. one-step runs (needs OPENAI_API_KEY)
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
 		echo "ERROR: OPENAI_API_KEY is not set."; \
 		exit 1; \
@@ -187,7 +187,7 @@ test-e2e-agents-workflows: ## Real-HTTP e2e tests for /v1/agents/run and /v1/wor
 	fi
 	@echo "Ensuring Postgres is up (needed for workflow run-state/transcript storage)..."
 	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d --wait postgres
-	uv run pytest tests/e2e/cloud_agents/test_agents_run_http_e2e.py tests/e2e/cloud_agents/test_workflows_http_e2e.py -v
+	uv run pytest tests/e2e/cloud_agents/test_workflows_http_e2e.py -v
 
 test-e2e-agents-workflows-mock: ## Real-HTTP e2e tests for spawn=none/local against a mock LLM (no OPENAI_API_KEY/gateway needed)
 	@if [ -z "$(CONTAINER_RUNTIME)" ]; then \
@@ -201,7 +201,6 @@ test-e2e-agents-workflows-mock: ## Real-HTTP e2e tests for spawn=none/local agai
 	@echo "Ensuring Postgres is up (needed for workflow run-state/transcript storage)..."
 	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d --wait postgres
 	OPENAI_API_KEY=sk-mock-ci-key LIGHTSPEED_E2E_USE_MOCK_LLM=1 uv run pytest \
-		tests/e2e/cloud_agents/test_agents_run_http_e2e.py \
 		tests/e2e/cloud_agents/test_workflows_http_e2e.py \
 		tests/e2e/cloud_agents/test_mock_llm_server.py \
 		tests/e2e/cloud_agents/test_mock_llm_env.py \
@@ -243,13 +242,13 @@ demo-agents-workflows-server: ## Start lightspeed-stack ready for the cloud-agen
 	OPENSHELL_GATEWAY_URL="$${OPENSHELL_GATEWAY_URL:-localhost:17670}" \
 		uv run python src/lightspeed_stack.py -c lightspeed-stack-harness.yaml
 
-demo-agents-workflows: ## Curl-based live demo against a running server (make demo-agents-workflows SCENARIO=agent-none|agent-local|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral|discover)
+demo-agents-workflows: ## Curl-based live demo against a running server (make demo-agents-workflows SCENARIO=oneshot-none|oneshot-local|oneshot-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral|discover)
 	@if ! curl -s -o /dev/null --max-time 2 "$${BASE_URL:-http://localhost:8090}/v1/info" 2>/dev/null; then \
 		echo "ERROR: no server reachable at $${BASE_URL:-http://localhost:8090}."; \
 		echo "Start one with: uv run make demo-agents-workflows-server"; \
 		exit 1; \
 	fi
-	./docs/cloud-agents-demo-curl.sh $(or $(SCENARIO),agent-none)
+	./docs/cloud-agents-demo-curl.sh $(or $(SCENARIO),oneshot-none)
 
 demo-agents-workflows-all: ## Run every demo scenario against a running server (see demo-agents-workflows-server); does not include discover
 	@if ! curl -s -o /dev/null --max-time 2 "$${BASE_URL:-http://localhost:8090}/v1/info" 2>/dev/null; then \
@@ -258,7 +257,7 @@ demo-agents-workflows-all: ## Run every demo scenario against a running server (
 		exit 1; \
 	fi
 	@failed=""; \
-	for scenario in agent-none agent-local agent-ephemeral workflow-ephemeral-approval workflow-none-approval workflow-local workflow-ephemeral; do \
+	for scenario in oneshot-none oneshot-local oneshot-ephemeral workflow-ephemeral-approval workflow-none-approval workflow-local workflow-ephemeral; do \
 		echo; \
 		echo "########## $$scenario ##########"; \
 		if ! ./docs/cloud-agents-demo-curl.sh "$$scenario"; then \

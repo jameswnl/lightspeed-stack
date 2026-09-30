@@ -1,7 +1,6 @@
 """Concrete REST API request models grouped by domain."""
 
 from models.api.requests.agents import (
-    AgentRunRequest,
     ApproveWorkflowRequest,
     RunWorkflowRequest,
 )
@@ -28,7 +27,6 @@ from models.api.requests.vector_stores import (
 )
 
 __all__ = [
-    "AgentRunRequest",
     "ApproveWorkflowRequest",
     "ConversationUpdateRequest",
     "FeedbackRequest",

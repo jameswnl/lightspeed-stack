@@ -40,7 +40,6 @@ service_name = configuration.configuration.name
 # Global OpenAPI tags so every operation tag is declared (Spectral: operation-tag-defined).
 _OPENAPI_TAGS: Final[list[dict[str, str]]] = [
     {"name": "a2a", "description": "Agent-to-Agent (A2A) protocol."},
-    {"name": "agents", "description": "Agent execution."},
     {"name": "authorized", "description": "Authorization probe."},
     {"name": "config", "description": "Service configuration."},
     {"name": "conversations_v1", "description": "Conversations API v1."},
@@ -91,12 +90,10 @@ async def lifespan(  # pylint: disable=too-many-branches,too-many-statements,imp
     # cloud-agents' step/workflow executors emit OTEL spans through a tracer
     # that only records once a global TracerProvider is set -- otherwise
     # every span is silently dropped (NoOp tracer) even when
-    # OTEL_EXPORTER_OTLP_ENDPOINT is set. workflow.executor_factory already
-    # does this for /v1/workflows/run, but /v1/agents/run (agents.py) uses
-    # the step executors directly and never triggers it, so its spans were
-    # never exported. init_tracing is idempotent and a no-op when
-    # OTEL_EXPORTER_OTLP_ENDPOINT is unset, so calling it once here covers
-    # every code path.
+    # OTEL_EXPORTER_OTLP_ENDPOINT is set. init_tracing is idempotent and a
+    # no-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset, so calling it once
+    # here covers every code path (including /v1/workflows/run, whose
+    # executor factory also calls it defensively).
     init_tracing("workflow-runner")
 
     llama_stack_config = configuration.configuration.llama_stack

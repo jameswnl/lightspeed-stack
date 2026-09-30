@@ -108,6 +108,26 @@ class TestGetExecutor:
         mock_create_runner.assert_called_once_with(spawner=None)
 
 
+def _valid_definition() -> dict[str, Any]:
+    """Minimal valid one-step workflow definition for handler tests."""
+    return {
+        "apiVersion": "v1",
+        "kind": "AgentWorkflow",
+        "metadata": {"name": "test-wf"},
+        "spec": {
+            "steps": [
+                {
+                    "name": "agent",
+                    "type": "agent",
+                    "prompt": "Do it",
+                    "output_key": "result",
+                    "spawn": "none",
+                }
+            ]
+        },
+    }
+
+
 class TestStartWorkflow:
     """Tests for start_workflow_handler."""
 
@@ -150,6 +170,281 @@ class TestStartWorkflow:
         mock_executor.start.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_one_step_workflow_definition_forwarded(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A one-step workflow (one-shot agent run) forwards its definition as-is.
+
+        One-step workflows take the same start path as multi-step ones; the
+        handler does not special-case them.
+        """
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-oneshot"
+
+        definition = {
+            "apiVersion": "v1",
+            "kind": "AgentWorkflow",
+            "metadata": {"name": "one-shot-agent"},
+            "spec": {
+                "steps": [
+                    {
+                        "name": "agent",
+                        "type": "agent",
+                        "prompt": "Inspect the cluster",
+                        "output_key": "result",
+                        "spawn": "none",
+                    }
+                ]
+            },
+        }
+        body = RunWorkflowRequest(
+            definition=definition,
+            provider={"name": "openai", "model": "gpt-4o-mini"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        result = await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert result["workflow_id"] == "wf-oneshot"
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["definition"] == definition
+        assert workflow_input["provider"]["name"] == "openai"
+
+    @pytest.mark.asyncio
+    async def test_provider_falls_back_to_configured_defaults(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """An omitted provider falls back to inference.default_provider/model."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition=_valid_definition(),
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["provider"]["name"] == "openai"
+        assert workflow_input["provider"]["model"] == "gpt-4o"
+        assert workflow_input["provider"]["credentials_secret"] == "OPENAI_API_KEY"
+
+    @pytest.mark.asyncio
+    async def test_explicit_provider_overrides_configured_defaults(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """An explicit request provider wins over inference defaults."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+        mock_executor.start.return_value = "wf-abc123"
+
+        body = RunWorkflowRequest(
+            definition=_valid_definition(),
+            provider={"name": "anthropic", "model": "claude-sonnet-5"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        await start_workflow_handler.__wrapped__(request, body, auth)
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["provider"]["name"] == "anthropic"
+        assert workflow_input["provider"]["model"] == "claude-sonnet-5"
+
+    @pytest.mark.asyncio
+    async def test_secret_bearing_mcp_definition_rejected_with_422(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A definition with a credentialed MCP URL is rejected before start.
+
+        Regression test: LocalWorkflowRunner.start persists the raw
+        definition before build_graph/normalization runs, so without this
+        route-level gate the request would return 202 and store the
+        secret-bearing URL in workflow state first.
+        """
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {
+                    "steps": [
+                        {
+                            "name": "agent",
+                            "type": "agent",
+                            "prompt": "Do it",
+                            "output_key": "result",
+                            "mcp_servers": [
+                                {
+                                    "name": "cluster",
+                                    "url": "https://admin:s3cret@example.com/mcp",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+            provider={"name": "openai", "model": "gpt-4o-mini"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert exc_info.value.status_code == 422
+        assert "validation_errors" in exc_info.value.detail
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_secret_shaped_run_credentials_rejected_with_422(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A secret-shaped run-level credentials_secret is rejected before start."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+
+        body = RunWorkflowRequest(
+            definition=_valid_definition(),
+            provider={
+                "name": "openai",
+                "model": "gpt-4o-mini",
+                "credentials_secret": "sk-test",
+            },
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert exc_info.value.status_code == 422
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_malformed_definition_rejected_with_422(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A structurally invalid definition is rejected before start."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {"steps": "not-a-list"},
+            },
+            provider={"name": "openai", "model": "gpt-4o-mini"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert exc_info.value.status_code == 422
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unapproved_run_provider_rejected_with_422(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A run provider outside the approved contract is rejected before start."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+
+        body = RunWorkflowRequest(
+            definition=_valid_definition(),
+            provider={"name": "bogus", "model": "x"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert exc_info.value.status_code == 422
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unknown_step_type_rejected_with_422(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """An unknown step type fails model validation before start."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+
+        body = RunWorkflowRequest(
+            definition={
+                "apiVersion": "v1",
+                "kind": "AgentWorkflow",
+                "metadata": {"name": "test-wf"},
+                "spec": {
+                    "steps": [
+                        {
+                            "name": "weird",
+                            "type": "bogus",
+                            "prompt": "Do it",
+                            "output_key": "result",
+                        }
+                    ]
+                },
+            },
+            provider={"name": "openai", "model": "gpt-4o-mini"},
+        )
+        auth = ("user-1", "testuser", False, "token")
+        request = mocker.MagicMock()
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(request, body, auth)
+
+        assert exc_info.value.status_code == 422
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_credentials_secret_added_for_known_provider(
         self,
         mocker: MockerFixture,
@@ -167,12 +462,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
             provider={"name": "anthropic", "model": "claude-sonnet-5"},
         )
         auth = ("user-1", "testuser", False, "token")
@@ -196,12 +486,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
             provider={"name": "bedrock", "model": "some-model"},
         )
         auth = ("user-1", "testuser", False, "token")
@@ -225,12 +510,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
             provider={
                 "name": "openai",
                 "model": "gpt-4o",
@@ -265,12 +545,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
         )
         auth = ("user-1", "testuser", False, "token")
         request = mocker.MagicMock()
@@ -295,12 +570,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
             sandbox_image="custom-sandbox:v9",
         )
         auth = ("user-1", "testuser", False, "token")
@@ -324,12 +594,7 @@ class TestStartWorkflow:
         mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
-            definition={
-                "apiVersion": "v1",
-                "kind": "AgentWorkflow",
-                "metadata": {"name": "test-wf"},
-                "spec": {"steps": []},
-            },
+            definition=_valid_definition(),
         )
         auth = ("user-1", "testuser", False, "token")
         request = mocker.MagicMock()

@@ -11,7 +11,12 @@ from __future__ import annotations
 import json
 
 import httpx
-from openai.types.responses import Response, ResponseOutputMessage, ResponseOutputText
+from openai.types.responses import (
+    Response,
+    ResponseFunctionToolCall,
+    ResponseOutputMessage,
+    ResponseOutputText,
+)
 
 from .mock_llm_server import DEFAULT_RESPONSE_TEXT, MockResponsesServer
 
@@ -111,5 +116,93 @@ def test_native_structured_output_returns_schema_conforming_json() -> None:
         assert decoded.keys() == {"healthy", "reason"}
         assert isinstance(decoded["healthy"], bool)
         assert isinstance(decoded["reason"], str)
+    finally:
+        server.stop()
+
+
+def test_tool_script_first_turn_returns_function_call() -> None:
+    """With a tool script, a tool-declaring request gets a function_call.
+
+    Drives deterministic tool use for transcript-parity tests: the agent's
+    first request declares its tools and gets back a scripted call.
+    """
+    server = MockResponsesServer(
+        tool_call={"name": "parity_probe", "arguments": {"q": 1}, "result_text": "done"}
+    )
+    server.start()
+    try:
+        result = httpx.post(
+            f"{server.base_url}/responses",
+            json={
+                "model": "gpt-4o",
+                "input": "hi",
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "parity_probe",
+                        "parameters": {"type": "object"},
+                    }
+                ],
+            },
+            timeout=5.0,
+        )
+        parsed = Response.model_validate(result.json())
+        call = parsed.output[0]
+        assert isinstance(call, ResponseFunctionToolCall)
+        assert call.name == "parity_probe"
+        assert json.loads(call.arguments) == {"q": 1}
+        assert call.call_id
+    finally:
+        server.stop()
+
+
+def test_tool_script_second_turn_returns_final_text() -> None:
+    """After the tool result round-trips, the mock returns final text."""
+    server = MockResponsesServer(
+        tool_call={"name": "parity_probe", "arguments": {}, "result_text": "all done"}
+    )
+    server.start()
+    try:
+        result = httpx.post(
+            f"{server.base_url}/responses",
+            json={
+                "model": "gpt-4o",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_mock_1",
+                        "output": "42",
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "parity_probe",
+                        "parameters": {"type": "object"},
+                    }
+                ],
+            },
+            timeout=5.0,
+        )
+        parsed = Response.model_validate(result.json())
+        assert _first_output_text(parsed) == "all done"
+    finally:
+        server.stop()
+
+
+def test_tool_script_without_tools_falls_back_to_text() -> None:
+    """A tool-scripted server still answers plain no-tool requests with text."""
+    server = MockResponsesServer(
+        tool_call={"name": "parity_probe", "arguments": {}, "result_text": "done"}
+    )
+    server.start()
+    try:
+        result = httpx.post(
+            f"{server.base_url}/responses",
+            json={"model": "gpt-4o", "input": "hi"},
+            timeout=5.0,
+        )
+        parsed = Response.model_validate(result.json())
+        assert _first_output_text(parsed) == DEFAULT_RESPONSE_TEXT
     finally:
         server.stop()

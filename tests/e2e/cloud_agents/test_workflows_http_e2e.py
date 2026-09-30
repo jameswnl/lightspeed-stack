@@ -377,6 +377,26 @@ class TestWorkflowHttpE2E:
         assert completed["status"] == "completed"
         assert "investigate_result" in completed["steps"]
 
+        transcripts_response = http_client.get(
+            f"/v1/workflows/{workflow_id}/transcripts"
+        )
+        assert transcripts_response.status_code == 200
+        # Canonical transcript contract (issue #52): the same per-event
+        # shape as spawn:none/local -- {"ts", "type", "data"} events from
+        # the canonical vocabulary.
+        transcript = transcripts_response.json()["transcripts"]["investigate_result"]
+        events = transcript["events"]
+        assert events, "ephemeral transcript should not be empty"
+        for event in events:
+            assert set(event.keys()) == {"ts", "type", "data"}
+            assert event["type"] in {
+                "tool_call",
+                "tool_result",
+                "thinking",
+                "result",
+                "error",
+            }
+
 
 class TestOneStepWorkflowHttpE2E:
     """A one-step workflow (one-shot agent run) over real HTTP.
@@ -441,7 +461,30 @@ class TestOneStepWorkflowHttpE2E:
             f"/v1/workflows/{workflow_id}/transcripts"
         )
         assert transcripts_response.status_code == 200
-        assert "result" in transcripts_response.json()["transcripts"]
+        # Canonical transcript contract (issue #52): every event is
+        # {"ts", "type", "data"} with a type from the canonical
+        # vocabulary -- same shape as spawn:local/ephemeral. A no-tool
+        # spawn:none run yields exactly one aggregate result event.
+        transcript = transcripts_response.json()["transcripts"]["result"]
+        events = transcript["events"]
+        assert events, "one-step transcript should not be empty"
+        for event in events:
+            assert set(event.keys()) == {"ts", "type", "data"}
+            assert event["type"] in {
+                "tool_call",
+                "tool_result",
+                "thinking",
+                "result",
+                "error",
+            }
+        result_events = [e for e in events if e["type"] == "result"]
+        assert len(result_events) == 1
+        assert set(result_events[0]["data"]) == {
+            "text",
+            "cost_usd",
+            "input_tokens",
+            "output_tokens",
+        }
 
     def test_secret_bearing_definition_rejected_with_422(
         self, http_client: TestClient

@@ -11,12 +11,18 @@ in CI. spawn=ephemeral tests still require a real key and gateway.
 
 from __future__ import annotations
 
+import itertools
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Optional
 
 DEFAULT_RESPONSE_TEXT = "Mock LLM response: acknowledged."
+
+# Monotonic call ids so a retried first turn never reuses a call_id
+# (itertools.count.__next__ is atomic under the GIL; the ThreadingHTTPServer
+# handler threads only ever call it under here).
+_CALL_IDS = itertools.count(1)
 
 
 def _placeholder_for_schema(schema: dict[str, Any]) -> Any:
@@ -87,15 +93,75 @@ def _canned_response_body(text: str) -> dict[str, Any]:
     }
 
 
+def _canned_function_call_body(
+    call_id: str, name: str, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """Build a minimal body whose output is a single scripted function_call."""
+    body = _canned_response_body("")
+    body["output"] = [
+        {
+            "id": call_id,
+            "type": "function_call",
+            "status": "completed",
+            "call_id": call_id,
+            "name": name,
+            "arguments": json.dumps(arguments),
+        }
+    ]
+    return body
+
+
+def _input_has_function_call_output(request_body: dict[str, Any]) -> bool:
+    """Detect a tool-result round-trip in the request input.
+
+    pydantic-ai's second turn sends the tool's return value as
+    {"type": "function_call_output", ...} input items -- that is the
+    signal to stop scripting a tool call and answer with final text.
+    Non-list input shapes (str, None, or unexpected truthy values) are
+    treated as "no tool results yet".
+    """
+    input_value = request_body.get("input")
+    if not isinstance(input_value, list):
+        return False
+    for item in input_value:
+        if isinstance(item, dict) and item.get("type") == "function_call_output":
+            return True
+    return False
+
+
 class _ResponsesHandler(BaseHTTPRequestHandler):
     """Handles POST /v1/responses with a canned response body."""
 
-    response_text: str = DEFAULT_RESPONSE_TEXT
+    response_text: str
+    tool_call: Optional[dict[str, Any]] = None
 
     def log_message(  # pylint: disable=arguments-differ
         self, format_: str, *args: Any
     ) -> None:
         """Silence default request logging."""
+
+    def _select_body(self, request_body: dict[str, Any]) -> dict[str, Any]:
+        """Choose the scripted or canned response body for a request.
+
+        With a tool_call script configured: a request that declares tools
+        and carries no tool results yet gets a scripted function_call;
+        anything else (including the tool-result turn) gets text.
+        """
+        script = self.tool_call
+        if (
+            script
+            and request_body.get("tools")
+            and not _input_has_function_call_output(request_body)
+        ):
+            return _canned_function_call_body(
+                call_id=f"call_mock_{next(_CALL_IDS)}",
+                name=script.get("name", ""),
+                arguments=script.get("arguments") or {},
+            )
+        text = _response_text_for_request(request_body, self.response_text)
+        if script and _input_has_function_call_output(request_body):
+            text = script.get("result_text", text)
+        return _canned_response_body(text)
 
     def do_POST(self) -> None:  # pylint: disable=invalid-name
         """Return a canned Responses-API body for /v1/responses, 404 otherwise."""
@@ -110,8 +176,7 @@ class _ResponsesHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             request_body = {}
 
-        text = _response_text_for_request(request_body, self.response_text)
-        payload = json.dumps(_canned_response_body(text)).encode()
+        payload = json.dumps(self._select_body(request_body)).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -120,14 +185,32 @@ class _ResponsesHandler(BaseHTTPRequestHandler):
 
 
 class MockResponsesServer:
-    """A loopback-only mock of OpenAI's /v1/responses endpoint."""
+    """A loopback-only mock of OpenAI's /v1/responses endpoint.
 
-    def __init__(self, response_text: str = DEFAULT_RESPONSE_TEXT) -> None:
-        """Build the server (not yet listening -- call start())."""
+    Optionally scripts one deterministic tool call: the agent's first
+    request (declares tools, no tool results yet) gets a function_call
+    for ``tool_call["name"]`` with ``tool_call["arguments"]``; once the
+    tool result round-trips, the mock answers with
+    ``tool_call["result_text"]``. Used by transcript-parity tests so
+    spawn=none/local runs make identical, reproducible tool calls.
+    """
+
+    def __init__(
+        self,
+        response_text: str = DEFAULT_RESPONSE_TEXT,
+        tool_call: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Build the server (not yet listening -- call start()).
+
+        Parameters:
+            response_text: Canned final text for plain requests.
+            tool_call: Optional script dict with "name", "arguments",
+                and "result_text" keys enabling tool-call scripting.
+        """
         handler = type(
             "_BoundResponsesHandler",
             (_ResponsesHandler,),
-            {"response_text": response_text},
+            {"response_text": response_text, "tool_call": tool_call},
         )
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)

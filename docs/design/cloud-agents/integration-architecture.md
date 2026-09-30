@@ -273,6 +273,43 @@ graph TB
 | `/v1/workflows/{id}/transcripts` | GET | Get step transcripts |
 | `/v1/agent-tools` | GET | List registered tools |
 
+## Workflow Transcript Contract
+
+`GET /v1/workflows/{id}/transcripts` returns per-step transcripts made of
+canonical events — identical event types and `data` keys for every spawn
+mode (`none`, `local`, `ephemeral`), for one-step and multi-step
+workflows alike:
+
+```json
+{
+  "result": {
+    "step_name": "result",
+    "events": [
+      {"ts": "…", "type": "tool_call",   "data": {"name": "kubectl_get", "input": "{\"resource\": \"pods\"}"}},
+      {"ts": "…", "type": "tool_result", "data": {"output": "pod-list"}},
+      {"ts": "…", "type": "result",      "data": {"text": "…", "cost_usd": null, "input_tokens": 16, "output_tokens": 18}}
+    ],
+    "input_tokens": 16,
+    "output_tokens": 18,
+    "duration_ms": 812
+  }
+}
+```
+
+Event types: `tool_call`, `tool_result`, `thinking`, `result`, `error`.
+Failed runs persist a single `error` event (`{"message": …}`). The
+normative contract (including the sandbox `EventLogger` that defines the
+`data` keys) is cloud-agents'
+`docs/workflow-transcript-contract.md`.
+
+Known per-mode differences (documented, not shape differences):
+
+- `none`/`local` emit one aggregate `result` event per run with
+  `cost_usd: null` (pydantic-ai exposes no per-turn usage or cost);
+  `ephemeral` emits one `result` event per agent turn with real cost.
+- Reconstructed (`none`/`local`) events carry the run-completion
+  timestamp; event order, not `ts`, carries execution order.
+
 ## Configuration
 
 ```yaml

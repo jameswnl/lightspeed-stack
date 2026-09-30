@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from authentication import get_auth_dependency
 from authentication.interface import AuthTuple
-from authorization.middleware import authorize
+from authorization.middleware import authorize, is_admin
 from configuration import configuration
 from log import get_logger
 from models.api.requests.agents import ApproveWorkflowRequest, RunWorkflowRequest
@@ -23,6 +23,10 @@ from models.config import Action
 from utils.endpoints import check_configuration_loaded
 from workflow.provider_credentials import credentials_secret_for
 from workflow.spawner_factory import build_spawner
+from workflow.submission_guard import (
+    enforce_submission_hardening,
+    reject_oversized_definition,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["workflows"])
@@ -128,17 +132,31 @@ async def start_workflow_handler(
     Returns:
         Workflow ID and initial status.
     """
-    _ = request
     user_id, username, _, _ = auth
 
     check_configuration_loaded(configuration)
     executor = _get_executor()
 
+    spawner_config = configuration.spawner_configuration
+    default_sandbox_image = (
+        spawner_config.sandbox_image  # pylint: disable=no-member
+        if spawner_config
+        else "lightspeed-agentic-sandbox:latest"
+    )
+
+    # Pipeline order (issue #51): byte cap (413), shape (422), then the
+    # stack's own rules -- forbidden caller fields (400), count caps (422)
+    # and privileged options (403) -- all before anything is persisted.
+    reject_oversized_definition(body.definition)
     inference = configuration.inference
-    provider = body.provider or {
-        "name": inference.default_provider or "",
-        "model": inference.default_model or "",
-    }
+    caller_provider = dict(
+        body.provider
+        or {
+            "name": inference.default_provider or "",
+            "model": inference.default_model or "",
+        }
+    )
+    provider = dict(caller_provider)
     if "credentials_secret" not in provider:
         cred_secret = credentials_secret_for(provider.get("name") or "")
         if cred_secret:
@@ -150,12 +168,13 @@ async def start_workflow_handler(
     # must be rejected here -- otherwise it returns 202 and lands in
     # workflow state first.
     _validate_workflow_submission(body.definition, provider)
-
-    spawner_config = configuration.spawner_configuration
-    default_sandbox_image = (
-        spawner_config.sandbox_image  # pylint: disable=no-member
-        if spawner_config
-        else "lightspeed-agentic-sandbox:latest"
+    enforce_submission_hardening(
+        body.definition,
+        caller_provider,
+        body.sandbox_image,
+        is_admin=is_admin(request),
+        default_sandbox_image=default_sandbox_image,
+        spawner_configured=spawner_config is not None,
     )
 
     workflow_input = {

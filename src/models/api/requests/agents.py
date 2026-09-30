@@ -37,7 +37,7 @@ class RunWorkflowRequest(BaseModel):
 
     provider: Optional[dict[str, Any]] = Field(
         None,
-        description="Default provider config: {name, model, credentials_secret}.",
+        description="Default provider config: {name, model}. The stack chooses the credential; credentials_secret is rejected.",
     )
 
     sandbox_image: Optional[str] = Field(

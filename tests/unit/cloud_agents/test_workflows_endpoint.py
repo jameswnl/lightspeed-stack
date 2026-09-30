@@ -1,6 +1,6 @@
 """Unit tests for the /v1/workflows/* endpoints."""
 
-# pylint: disable=protected-access,too-few-public-methods,unused-argument,import-outside-toplevel
+# pylint: disable=protected-access,too-few-public-methods,unused-argument,import-outside-toplevel,too-many-public-methods
 
 from __future__ import annotations
 
@@ -19,6 +19,13 @@ from app.endpoints.workflows import (
     start_workflow_handler,
 )
 from models.api.requests.agents import ApproveWorkflowRequest, RunWorkflowRequest
+
+
+def _request(mocker: MockerFixture, admin: bool = True) -> Any:
+    """Build a mock request whose caller is (by default) an admin."""
+    request = mocker.MagicMock()
+    mocker.patch("app.endpoints.workflows.is_admin", return_value=admin)
+    return request
 
 
 @pytest.fixture(autouse=True)
@@ -161,7 +168,7 @@ class TestStartWorkflow:
             }
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         result = await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -205,7 +212,7 @@ class TestStartWorkflow:
             provider={"name": "openai", "model": "gpt-4o-mini"},
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         result = await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -230,7 +237,7 @@ class TestStartWorkflow:
             definition=_valid_definition(),
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -256,7 +263,7 @@ class TestStartWorkflow:
             provider={"name": "anthropic", "model": "claude-sonnet-5"},
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -306,7 +313,7 @@ class TestStartWorkflow:
             provider={"name": "openai", "model": "gpt-4o-mini"},
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         from fastapi import HTTPException
 
@@ -337,7 +344,7 @@ class TestStartWorkflow:
             },
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         from fastapi import HTTPException
 
@@ -368,7 +375,7 @@ class TestStartWorkflow:
             provider={"name": "openai", "model": "gpt-4o-mini"},
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         from fastapi import HTTPException
 
@@ -394,7 +401,7 @@ class TestStartWorkflow:
             provider={"name": "bogus", "model": "x"},
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         from fastapi import HTTPException
 
@@ -434,7 +441,7 @@ class TestStartWorkflow:
             provider={"name": "openai", "model": "gpt-4o-mini"},
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         from fastapi import HTTPException
 
@@ -466,7 +473,7 @@ class TestStartWorkflow:
             provider={"name": "anthropic", "model": "claude-sonnet-5"},
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -490,7 +497,7 @@ class TestStartWorkflow:
             provider={"name": "bedrock", "model": "some-model"},
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -498,32 +505,152 @@ class TestStartWorkflow:
         assert "credentials_secret" not in workflow_input["provider"]
 
     @pytest.mark.asyncio
-    async def test_caller_supplied_credentials_secret_not_overridden(
+    async def test_caller_supplied_credentials_secret_rejected(
         self,
         mocker: MockerFixture,
         mock_config: Any,
         mock_executor: Any,
     ) -> None:
-        """A caller-supplied credentials_secret is preserved as-is."""
+        """A caller-supplied credentials_secret is 400 (G1), even for admins."""
+        from fastapi import HTTPException
+
         mocker.patch("app.endpoints.workflows.check_configuration_loaded")
         mock_config.spawner_configuration = None
-        mock_executor.start.return_value = "wf-abc123"
 
         body = RunWorkflowRequest(
             definition=_valid_definition(),
             provider={
                 "name": "openai",
                 "model": "gpt-4o",
-                "credentials_secret": "MY_CUSTOM_KEY",
+                "credentials_secret": "DATABASE_URL",
             },
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
 
-        await start_workflow_handler.__wrapped__(request, body, auth)
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(_request(mocker), body, auth)
 
-        workflow_input = mock_executor.start.call_args[0][0]
-        assert workflow_input["provider"]["credentials_secret"] == "MY_CUSTOM_KEY"
+        assert exc_info.value.status_code == 400
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_definition_provider_credentials_secret_rejected(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """definition.provider.credentials_secret is 400 (G2)."""
+        from fastapi import HTTPException
+
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+        definition = _valid_definition()
+        definition["provider"] = {
+            "name": "bedrock",
+            "model": "m",
+            "credentials_secret": "DATABASE_URL",
+        }
+        body = RunWorkflowRequest(definition=definition)
+        auth = ("user-1", "testuser", False, "token")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(_request(mocker), body, auth)
+
+        assert exc_info.value.status_code == 400
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda d, b: b.update(sandbox_image="evil:1"),
+            lambda d, b: d.update(advisory=True),
+            lambda d, b: d["spec"]["steps"][0].update(spawn="local"),
+            lambda d, b: d.update(skills={"image": "evil:1"}),
+        ],
+        ids=["sandbox-image", "advisory", "local-spawn", "skills-image"],
+    )
+    async def test_privileged_options_need_admin(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+        mutate: Any,
+    ) -> None:
+        """Non-admins get 403 (nothing started); admins are accepted."""
+        from fastapi import HTTPException
+
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        spawner_config = mocker.MagicMock()
+        spawner_config.sandbox_image = "default-sandbox:v1"
+        mock_config.spawner_configuration = spawner_config
+        mock_executor.start.return_value = "wf-1"
+        definition = _valid_definition()
+        definition["spec"]["steps"][0]["spawn"] = "ephemeral"
+        extras: dict[str, Any] = {}
+        mutate(definition, extras)
+        body = RunWorkflowRequest(definition=definition, **extras)
+        auth = ("user-1", "testuser", False, "token")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(
+                _request(mocker, admin=False), body, auth
+            )
+        assert exc_info.value.status_code == 403
+        mock_executor.start.assert_not_called()
+
+        await start_workflow_handler.__wrapped__(_request(mocker), body, auth)
+        mock_executor.start.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_non_admin_ephemeral_workflow_accepted(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A normal user can run an ephemeral workflow on the default image."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        spawner_config = mocker.MagicMock()
+        spawner_config.sandbox_image = "default-sandbox:v1"
+        mock_config.spawner_configuration = spawner_config
+        mock_executor.start.return_value = "wf-1"
+        definition = _valid_definition()
+        definition["spec"]["steps"][0]["spawn"] = "ephemeral"
+        body = RunWorkflowRequest(definition=definition)
+        auth = ("user-1", "testuser", False, "token")
+
+        result = await start_workflow_handler.__wrapped__(
+            _request(mocker, admin=False), body, auth
+        )
+
+        assert result["workflow_id"] == "wf-1"
+
+    @pytest.mark.asyncio
+    async def test_oversized_definition_rejected_with_413(
+        self,
+        mocker: MockerFixture,
+        mock_config: Any,
+        mock_executor: Any,
+    ) -> None:
+        """A definition over the byte cap is 413 before any validation."""
+        from fastapi import HTTPException
+
+        from workflow.limits import MAX_DEFINITION_BYTES
+
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_config.spawner_configuration = None
+        definition = _valid_definition()
+        definition["spec"]["steps"][0]["prompt"] = "x" * (MAX_DEFINITION_BYTES + 1)
+        body = RunWorkflowRequest(definition=definition)
+        auth = ("user-1", "testuser", False, "token")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(_request(mocker), body, auth)
+
+        assert exc_info.value.status_code == 413
+        mock_executor.start.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_sandbox_image_falls_back_to_spawner_config(
@@ -548,7 +675,7 @@ class TestStartWorkflow:
             definition=_valid_definition(),
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -562,7 +689,7 @@ class TestStartWorkflow:
         mock_config: Any,
         mock_executor: Any,
     ) -> None:
-        """A request-level sandbox_image wins over spawner_configuration."""
+        """An admin's request-level sandbox_image wins over spawner_configuration."""
         mocker.patch("app.endpoints.workflows.check_configuration_loaded")
         spawner_config = mocker.MagicMock()
         spawner_config.sandbox_image = "configured-sandbox:v3"
@@ -574,7 +701,7 @@ class TestStartWorkflow:
             sandbox_image="custom-sandbox:v9",
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -597,7 +724,7 @@ class TestStartWorkflow:
             definition=_valid_definition(),
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -635,7 +762,7 @@ class TestStartWorkflow:
             session_id="ses-abc123",
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -673,7 +800,7 @@ class TestStartWorkflow:
             },
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -715,7 +842,7 @@ class TestStartWorkflow:
             },
         )
         auth = ("user-42", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         await start_workflow_handler.__wrapped__(request, body, auth)
 
@@ -747,7 +874,7 @@ class TestGetWorkflow:
         )
 
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         result = await get_workflow_handler.__wrapped__(request, "wf-1", auth)
 
@@ -767,7 +894,7 @@ class TestGetWorkflow:
         mock_executor.get_status.side_effect = KeyError("not found")
 
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         from fastapi import HTTPException
 
@@ -795,7 +922,7 @@ class TestApproveWorkflow:
             approver="admin",
         )
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         result = await approve_workflow_handler.__wrapped__(request, "wf-1", body, auth)
 
@@ -817,7 +944,7 @@ class TestCancelWorkflow:
         mocker.patch("app.endpoints.workflows.check_configuration_loaded")
 
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         result = await cancel_workflow_handler.__wrapped__(request, "wf-1", auth)
 
@@ -842,7 +969,7 @@ class TestGetTranscripts:
         }
 
         auth = ("user-1", "testuser", False, "token")
-        request = mocker.MagicMock()
+        request = _request(mocker)
 
         result = await get_transcripts_handler.__wrapped__(request, "wf-1", auth)
 

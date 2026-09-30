@@ -22,12 +22,10 @@ from cloud_agents.workflow.executor.step.base import (
 
 from configuration import configuration
 from log import get_logger
+from workflow.limits import MAX_INSTRUCTIONS_LENGTH, MAX_PROMPT_LENGTH
 from workflow.storage import WorkflowStorageFactory
 
 logger = get_logger(__name__)
-
-MAX_PROMPT_LENGTH = 100_000
-MAX_INSTRUCTIONS_LENGTH = 50_000
 
 _runner: Optional[ChatWorkflowRunner] = None
 

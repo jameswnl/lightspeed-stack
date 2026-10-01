@@ -1,7 +1,6 @@
 """E2E tests verifying OTEL trace chaining for LocalWorkflowRunner runs.
 
-Companion to test_otel_tracing_e2e.py (which covers ChatWorkflowRunner) —
-this file covers the workflow-runner path (LocalWorkflowRunner, i.e.
+This file covers the workflow-runner path (LocalWorkflowRunner, i.e.
 /v1/workflows/*). See jameswnl/lightspeed-stack#20 for full context and
 jameswnl/lightspeed-cloud-agents#179 for the originating cloud-agents issue
 (split into #181 and #183, both now resolved).

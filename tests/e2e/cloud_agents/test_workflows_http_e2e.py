@@ -40,6 +40,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from .conftest import postgres_reachable, skip_if_gateway_unreachable, wait_for_status
+from .workflow_e2e_helpers import assert_canonical_events
 
 pytestmark = [
     pytest.mark.skipif(
@@ -377,6 +378,16 @@ class TestWorkflowHttpE2E:
         assert completed["status"] == "completed"
         assert "investigate_result" in completed["steps"]
 
+        transcripts_response = http_client.get(
+            f"/v1/workflows/{workflow_id}/transcripts"
+        )
+        assert transcripts_response.status_code == 200
+        # Canonical transcript contract (issue #52): the same per-event
+        # shape AND data keys as spawn:none/local -- checked against the
+        # shared EventLogger-derived contract for all modes.
+        transcript = transcripts_response.json()["transcripts"]["investigate_result"]
+        assert_canonical_events(transcript["events"])
+
 
 class TestOneStepWorkflowHttpE2E:
     """A one-step workflow (one-shot agent run) over real HTTP.
@@ -441,7 +452,14 @@ class TestOneStepWorkflowHttpE2E:
             f"/v1/workflows/{workflow_id}/transcripts"
         )
         assert transcripts_response.status_code == 200
-        assert "result" in transcripts_response.json()["transcripts"]
+        # Canonical transcript contract (issue #52): shared shape AND
+        # data-key checks across all spawn modes. A no-tool spawn:none
+        # run yields exactly one aggregate result event.
+        transcript = transcripts_response.json()["transcripts"]["result"]
+        events = transcript["events"]
+        assert_canonical_events(events)
+        result_events = [e for e in events if e["type"] == "result"]
+        assert len(result_events) == 1
 
     def test_secret_bearing_definition_rejected_with_422(
         self, http_client: TestClient

@@ -279,6 +279,11 @@ finish_workflow() {
 
   echo
   echo "-- Per-step transcripts --"
+  # Canonical transcript contract: every step's events are {"ts","type","data"}
+  # with types tool_call/tool_result/thinking/result/error, identical across
+  # spawn modes (none/local/ephemeral). Useful jq projections:
+  #   '.transcripts | to_entries[].value.events[].type'      -- event sequence
+  #   '.transcripts.result.events[] | select(.type=="tool_call")'
   curl -sf "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" "$BASE_URL/v1/workflows/$wf_id/transcripts" | jq
 }
 

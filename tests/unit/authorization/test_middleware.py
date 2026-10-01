@@ -13,6 +13,7 @@ from authorization.middleware import (
     _perform_authorization_check,
     authorize,
     get_authorization_resolvers,
+    is_admin,
 )
 from authorization.resolvers import (
     AccessResolver,
@@ -325,6 +326,7 @@ class TestPerformAuthorizationCheck:
 
         if request_location != "none":
             assert mock_request.state.authorized_actions == {Action.QUERY}
+            assert mock_request.state.user_roles == {"employee", "*"}
 
     @pytest.mark.asyncio
     async def test_everyone_role_added(
@@ -405,3 +407,35 @@ class TestAuthorizeDecorator:
             await mock_endpoint(auth=dummy_auth_tuple)
 
         assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+
+
+class TestIsAdmin:
+    """is_admin asks the access resolver, since get_actions never returns ADMIN."""
+
+    @staticmethod
+    def _request(mocker: MockerFixture, roles: Any) -> Any:
+        """Build a request whose state carries the resolved roles."""
+        request = mocker.MagicMock(spec=Request)
+        request.state = mocker.MagicMock()
+        request.state.user_roles = roles
+        return request
+
+    def test_admin_role_is_admin(self, mocker: MockerFixture) -> None:
+        """A role granted ADMIN is admin, though ADMIN is not in get_actions."""
+        resolver = GenericAccessResolver(
+            [
+                AccessRule(role="root", actions=[Action.ADMIN]),
+                AccessRule(role="user", actions=[Action.QUERY]),
+            ]
+        )
+        mocker.patch(
+            "authorization.middleware.get_authorization_resolvers",
+            return_value=(mocker.MagicMock(), resolver),
+        )
+        assert Action.ADMIN not in resolver.get_actions({"root"})
+        assert is_admin(self._request(mocker, {"root", "*"})) is True
+        assert is_admin(self._request(mocker, {"user", "*"})) is False
+
+    def test_missing_roles_is_not_admin(self, mocker: MockerFixture) -> None:
+        """No resolved roles on the request fails closed."""
+        assert is_admin(self._request(mocker, None)) is False

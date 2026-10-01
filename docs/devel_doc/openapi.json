@@ -21349,7 +21349,7 @@
                             }
                         ],
                         "title": "Provider",
-                        "description": "Default provider config: {name, model, credentials_secret}."
+                        "description": "Default provider config: {name, model}. The stack chooses the credential; credentials_secret is rejected."
                     },
                     "sandbox_image": {
                         "anyOf": [

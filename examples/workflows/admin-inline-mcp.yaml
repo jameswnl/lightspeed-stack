@@ -1,0 +1,36 @@
+# =============================================================================
+# admin-inline-mcp.yaml — trusted-admin workflow using an inline MCP server.
+#
+# Inline MCP is the exception path (role agent-admin, rules[].inline_mcp):
+#   - https only, no userinfo in the URL, host must be in inline_mcp_hosts
+#   - secret_headers carry REGISTRY refs ({name: ...}); the stack validates the
+#     ref and rewrites it to cloud-agents' {secret_name, key} form. A raw
+#     {secret_name, key} from a caller is rejected (400).
+#   - the (principal, server, ref) triple must be granted via mcp_secrets
+# Prefer named catalog entries; use this only for one-off trusted pipelines.
+# =============================================================================
+apiVersion: cloudagents/v1
+kind: AgentWorkflow
+metadata:
+  name: admin-inline-mcp
+  description: Query an operator-approved ad-hoc MCP endpoint.
+
+spec:
+  input_prompt: "List the open incidents."
+  spawn: ephemeral
+  service_account: workflow-runner
+  timeout_seconds: 600
+  steps:
+    - name: query
+      type: agent
+      agent: triage-agent
+      prompt: Use the incident tools to list open incidents.
+      output_key: incidents
+      mcp_servers:
+        - name: incidents
+          url: https://mcp.internal.example.com/incidents
+          secret_headers:
+            Authorization: {name: mcp/incidents}
+      timeout_seconds: 300
+      permissions:
+        max_tokens: 20000

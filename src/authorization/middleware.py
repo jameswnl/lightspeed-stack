@@ -157,6 +157,30 @@ async def _perform_authorization_check(
                 break
     if req is not None:
         req.state.authorized_actions = authorized_actions
+        req.state.user_roles = user_roles
+
+
+def is_admin(request: Request) -> bool:
+    """Return whether the request's caller holds the ADMIN action.
+
+    `authorized_actions` never contains ADMIN (an ADMIN grant expands to every
+    other action), so this asks the access resolver using the roles stored on
+    `request.state` by the authorization check. Only valid inside an
+    `@authorize`-decorated handler.
+
+    Parameters:
+        request: Request that has passed through an `@authorize` endpoint.
+
+    Returns:
+        True when any of the caller's roles grants ADMIN; False otherwise,
+        including when no roles were resolved (fail closed).
+    """
+    user_roles = getattr(request.state, "user_roles", None)
+    if not user_roles:
+        logger.debug("is_admin called without resolved user_roles")
+        return False
+    _, access_resolver = get_authorization_resolvers()
+    return access_resolver.check_access(Action.ADMIN, user_roles)
 
 
 def authorize(action: Action) -> Callable:

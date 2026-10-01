@@ -10,12 +10,15 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, status
 
+from log import get_logger
 from workflow.limits import (
     MAX_DEFINITION_BYTES,
     MAX_MCP_SERVERS_PER_STEP,
     MAX_SECRET_HEADERS_PER_SERVER,
     MAX_WORKFLOW_STEPS,
 )
+
+logger = get_logger(__name__)
 
 _PRIVILEGED_SPAWN_MODES = frozenset({"none", "local"})
 _DEFAULT_SPAWN = "ephemeral"
@@ -30,7 +33,7 @@ def reject_oversized_definition(definition: dict[str, Any]) -> None:
     Raises:
         HTTPException: 413 when the definition is over MAX_DEFINITION_BYTES.
     """
-    size = len(json.dumps(definition, default=str).encode("utf-8"))
+    size = len(json.dumps(definition).encode("utf-8"))
     if size > MAX_DEFINITION_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -109,6 +112,11 @@ def enforce_submission_hardening(  # pylint: disable=too-many-arguments
         default_sandbox_image: The spawner's configured sandbox image.
         spawner_configured: Whether a spawner_configuration exists.
 
+    Shape errors (422 from cloud-agents validation) take precedence over
+    these policy errors because the handler validates first. Denials raise
+    HTTPException directly and are logged; structured audit events land in
+    Phase 4 of the #51 plan.
+
     Raises:
         HTTPException: 400 when the caller names a credential, 422 when a
             count cap is exceeded, 403 for privileged options used without
@@ -161,6 +169,7 @@ def enforce_submission_hardening(  # pylint: disable=too-many-arguments
         denied.append("a custom sandbox image requires admin")
 
     if denied:
+        logger.info("Workflow submission denied: %s", denied)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"denied": denied},

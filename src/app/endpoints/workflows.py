@@ -167,6 +167,9 @@ async def start_workflow_handler(
     # runs, so secret-bearing, malformed, or unapproved-provider input
     # must be rejected here -- otherwise it returns 202 and lands in
     # workflow state first.
+    # `provider` carries the stack's injected credentials reference for the
+    # shape check; `caller_provider` keeps only the caller's keys so the
+    # credential-rejection check sees what the caller actually sent.
     _validate_workflow_submission(body.definition, provider)
     enforce_submission_hardening(
         body.definition,

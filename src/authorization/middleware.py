@@ -165,7 +165,8 @@ def is_admin(request: Request) -> bool:
 
     `authorized_actions` never contains ADMIN (an ADMIN grant expands to every
     other action), so this asks the access resolver using the roles stored on
-    `request.state` by the authorization check.
+    `request.state` by the authorization check. Only valid inside an
+    `@authorize`-decorated handler.
 
     Parameters:
         request: Request that has passed through an `@authorize` endpoint.
@@ -176,6 +177,7 @@ def is_admin(request: Request) -> bool:
     """
     user_roles = getattr(request.state, "user_roles", None)
     if not user_roles:
+        logger.debug("is_admin called without resolved user_roles")
         return False
     _, access_resolver = get_authorization_resolvers()
     return access_resolver.check_access(Action.ADMIN, user_roles)

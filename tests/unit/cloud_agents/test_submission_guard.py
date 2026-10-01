@@ -78,13 +78,10 @@ def _status(definition: dict[str, Any], **kwargs: Any) -> Optional[int]:
 class TestCredentialRoutes:
     """G1/G2: callers cannot choose the credential env var."""
 
-    def test_run_provider_credentials_secret_rejected(self) -> None:
-        """Run-level credentials_secret is 400, even for admins."""
-        provider = {
-            "name": "openai",
-            "model": "m",
-            "credentials_secret": "DATABASE_URL",
-        }
+    @pytest.mark.parametrize("value", ["DATABASE_URL", None, ""])
+    def test_run_provider_credentials_secret_rejected(self, value: Any) -> None:
+        """Run-level credentials_secret is 400 whatever its value, even for admins."""
+        provider = {"name": "openai", "model": "m", "credentials_secret": value}
         assert _status(_definition(), provider=provider) == 400
         assert _status(_definition(), provider=provider, is_admin=True) == 400
 
@@ -247,3 +244,9 @@ def test_approval_step_does_not_need_spawner() -> None:
         [_step(spawn="none"), {"name": "gate", "type": "human-approval"}]
     )
     assert _status(definition, is_admin=True, spawner_configured=False) is None
+
+
+def test_non_admin_none_spawn_forbidden_without_spawner() -> None:
+    """Admin is the only bypass for spawn none; a missing spawner is not."""
+    definition = _definition([_step(spawn="none")])
+    assert _status(definition, spawner_configured=False) == 403

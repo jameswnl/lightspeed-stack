@@ -283,49 +283,6 @@ workflow_cases:
     set: {spec.steps.triage.provider: {name: claude-prod}}
     expect: 422
 
-# /query/direct and /query/direct/stream: provider and MCP selection only.
-direct_cases:
-  - {name: default provider, as: [agent-user], body: {}, expect: 202}
-  - name: choosing provider and model needs model_override
-    as: [agent-user]
-    body: {provider: claude-prod, model: claude-haiku-4-5}
-    expect: 403
-    reason: model_override
-  - name: admin may choose an eligible provider
-    as: [agent-admin]
-    body: {provider: claude-prod, model: claude-haiku-4-5}
-    expect: 202
-  - name: provider that is not direct_query_eligible
-    as: [agent-admin]
-    body: {provider: openai-team-b, model: gpt-4o}
-    expect: 403
-    reason: direct_query_eligible
-  - name: unknown provider
-    as: [agent-admin]
-    body: {provider: nope}
-    expect: 400
-  - name: model outside allowed_models
-    as: [agent-admin]
-    body: {provider: claude-prod, model: claude-opus-4}
-    expect: 400
-  - name: no caller credential on this endpoint
-    as: [agent-admin]
-    body: {provider: claude-prod, credential_ref: {name: inference/anthropic-prod}}
-    expect: 400
-  - name: inline MCP is never allowed here
-    as: [agent-admin]
-    body: {mcp_servers: [{name: x, url: "https://mcp.internal.example.com/x"}]}
-    expect: 400
-  - name: secret_headers MCP server (needs cloud-agents#269)
-    as: [agent-user]
-    body: {mcp_servers: [github-readonly]}
-    expect: {pre269: 403, post269: 202}
-    reason: secret_headers
-  - name: MCP server not granted to the role
-    as: [agent-user]
-    body: {mcp_servers: [kb-search]}
-    expect: 403
-
 # Config-load failures. `set` patches the parsed lightspeed-stack.yaml.
 config_cases:
   - name: allowed_models [] is rejected
@@ -347,10 +304,6 @@ config_cases:
   - name: default_model must pass the default provider's allowed_models
     set: {workflow_engine.default_model: claude-opus-4}
     error: default_model
-  - name: direct-query-eligible entry bound to a non-default env key
-    set: {workflow_engine.secrets.inference/anthropic-prod.env: ANTHROPIC_PROD_KEY}
-    stage: pre269
-    error: default key
   - name: workflow_enabled MCP with request-bound auth
     set: {mcp_servers.github-readonly.authorization_headers: {Authorization: client}}
     error: workflow_enabled

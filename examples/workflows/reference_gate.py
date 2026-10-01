@@ -26,13 +26,6 @@ from workflow.limits import (
     MAX_WORKFLOW_STEPS,
 )
 
-DEFAULT_KEY = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "claude": "ANTHROPIC_API_KEY",
-    "gemini": "GOOGLE_API_KEY",
-    "azure": "AZURE_OPENAI_API_KEY",
-}
 REQUEST_BOUND = {"client", "oauth", "kubernetes"}
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9/_.-]{0,127}$")
 
@@ -90,9 +83,6 @@ def load_errors(stack: dict, stage: str = "pre269") -> list[str]:
             errors.append(f"{p['name']}: pre-269 inference credential must be env")
         if p.get("allowed_models") == []:
             errors.append(f"{p['name']}: allowed_models [] is rejected")
-        if p.get("direct_query_eligible") and stage == "pre269":
-            if binding.get("env") != DEFAULT_KEY.get(p["executor_type"]):
-                errors.append(f"{p['name']}: eligible entry not bound to default key")
     by_name = {p["name"]: p for p in providers}
     dp = we.get("default_provider")
     if providers and dp not in by_name:
@@ -360,34 +350,3 @@ def submit(
         raise Denied(403, *why)
     return []
 
-
-def submit_direct(stack: dict, body: dict, roles: set[str], stage: str = "pre269") -> list[str]:
-    """Run the /query/direct provider and MCP checks (pipeline steps 1, 3-5)."""
-    we = stack["workflow_engine"]
-    if not _can(stack, roles, "query"):
-        raise Denied(403, "query not granted")
-    if (body.get("provider") or body.get("model")) and not _can(stack, roles, "model_override"):
-        raise Denied(403, "model_override required to choose provider or model")
-    if "credential_ref" in body or "credentials_secret" in body:
-        raise Denied(400, "no caller credential on /query/direct")
-    name = body.get("provider") or we["default_provider"]
-    entry, _ = _resolve(stack, name, body.get("model"))
-    g = grants(stack, roles)
-    why = []
-    if name not in g.get("providers", []):
-        why.append(f"provider '{name}' not granted")
-    if not entry.get("direct_query_eligible"):
-        why.append(f"provider '{name}' is not direct_query_eligible")
-    mcp = {m["name"]: m for m in stack["mcp_servers"]}
-    for srv in body.get("mcp_servers") or []:
-        if not isinstance(srv, str):
-            raise Denied(400, "inline MCP is not allowed on /query/direct")
-        if srv not in mcp or not mcp[srv].get("workflow_enabled"):
-            raise Denied(400, f"unknown MCP server '{srv}'")
-        if srv not in g.get("mcp_servers", []):
-            why.append(f"MCP '{srv}' not granted")
-        if mcp[srv].get("secret_headers") and stage == "pre269":
-            why.append(f"MCP '{srv}' has secret_headers; not usable here before cloud-agents#269")
-    if why:
-        raise Denied(403, *why)
-    return []

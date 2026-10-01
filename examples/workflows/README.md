@@ -34,7 +34,7 @@ lightspeed-stack as the sole policy/secret boundary in front of cloud-agents.
 | `post-269-overrides.yaml` | Operator | What changes after cloud-agents#269 (K8s-bound inference credentials, leases) |
 | `k8s-deployment.yaml` | Operator | Hardened Deployment, least-privilege RBAC, NetworkPolicy |
 | `external-secrets.yaml` | Operator | Production source of the Secrets (External Secrets Operator + Vault) |
-| `cases.yaml` | Contract | 74 request/config cases with the expected status, per stage |
+| `cases.yaml` | Contract | 63 request/config cases with the expected status, per stage |
 | `reference_gate.py` | Contract | Reference model of the gate; replaced by the real endpoint as phases land |
 | `verify.py` | Contract | Runs everything above plus deployment cross-checks |
 
@@ -57,7 +57,7 @@ Each criterion maps to something in this folder that `verify.py` checks, so
 | No secret values in payloads, state, logs | requests carry logical names only; `k8s-secrets.yaml` has placeholders only | `verify.py` secrets checks; Phase 4 canary suite later |
 | Inline MCP URLs / literal headers | `admin-inline-mcp.yaml`, `inline_mcp_hosts` | `cases.yaml` § inline MCP |
 | OpenShell provider injection for ephemeral | `spawner` block, README Step 6 | config schema check |
-| `none` / `local` restrictions | admin-only on workflows; `direct_query_eligible` on `/query/direct` | `cases.yaml` § spawn, `direct_cases` |
+| `none` / `local` restrictions | admin-only on workflows | `cases.yaml` § spawn |
 | Rotation and revocation | Step 8 (pre-#269 rules, Reloader) and Part 3 (post-#269) | documented; lease tests in Phase 6 |
 | Cleanup, redaction, cross-principal tests | not examples; Phase 4 / 6 test suites | cross-principal: `agent-support` vs triage, `agent-user` vs KB |
 | Deployment docs: K8s secrets, external managers, OpenShell | `k8s-secrets.yaml` (dev), `external-secrets.yaml`, `k8s-deployment.yaml` | `verify.py` deployment cross-checks |
@@ -144,19 +144,17 @@ In `lightspeed-stack.yaml` under `workflow_engine` (`PLAN(stack#51)`):
 - `providers`: one entry per logical provider. Each has exactly one
   `credential`, so choosing a credential means choosing an entry.
   `executor_type` must be in cloud-agents `APPROVED_INFERENCE_PROVIDERS`;
-  `allowed_models: null` means any model (`[]` fails load);
-  `direct_query_eligible: true` opts an entry into `/query/direct`.
+  `allowed_models: null` means any model (`[]` fails load).
 - `secrets`: logical ref → backend binding (`env` / `k8s` / `file`).
 - `default_provider` / `default_model`: the only defaults on cloud-agents
   paths. `inference.default_*` become Llama Stack-only.
 
 This example ships two entries: `claude-prod` (anthropic,
-`inference/anthropic-prod`, models pinned, `/query/direct`-eligible) and
+`inference/anthropic-prod`, models pinned) and
 `openai-team-b` (openai, `inference/openai-team-b`, any model).
 
 Config load fails fast instead of misbehaving at runtime: unknown
-`executor_type`, dangling ref, `allowed_models: []`, bad defaults, or an
-eligible `/query/direct` entry bound to a non-default env key.
+`executor_type`, dangling ref, `allowed_models: []`, or bad defaults.
 
 ### Step 3. Register MCP servers with credentials as references
 
@@ -360,24 +358,8 @@ a different catalog entry than the run provider → 400 (same-entry rule);
 
 ## Part 3 — Other surfaces
 
-### `/query/direct` and `/query/direct/stream`
-
-Same catalog and policy, provider and MCP selection only (`direct_cases` in
-`cases.yaml`). Chat runs `spawn: none` in-process, so it is limited to
-`direct_query_eligible` entries (`claude-prod` here, bound to its executor's
-default env key — load fails otherwise), catalog-only MCP, and no
-`secret_headers` servers until cloud-agents#269:
-
-```bash
-curl -s -X POST https://lightspeed.example.com/v1/query/direct \
-  -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"query": "Summarize issue 1234", "mcp_servers": []}'      # default provider
-# provider/model in the body need model_override (agent-admin only):
-#   {"query": "...", "provider": "claude-prod", "model": "claude-haiku-4-5"}
-```
-
-A follow-up turn keeps the provider/model it started with (a different one
-is 400). There is no `credential_ref` here: the entry's credential is used.
+> Chat on cloud-agents (`/query/direct`) is out of scope here; it was removed and is
+> tracked in [#59](https://github.com/jameswnl/lightspeed-stack/issues/59).
 
 ### Admin inline MCP
 
@@ -422,7 +404,7 @@ changes:
 | Handoff | names (`env` key, K8s Secret name) | short-lived lease per step, redeemed then released; cross-process via mTLS |
 | Revocation | new submissions only | next step fails closed (`credential_revoked`) |
 | Rotation | restart | next lease, no restart |
-| `secret_headers` MCP on `none`/`local`, `/query/direct` | 403 | allowed |
+| `secret_headers` MCP on `none`/`local` | 403 | allowed |
 | Same-entry rule | enforced | can relax (each step has its own lease) |
 | `spawn: none` / `local` | admin-only (process-wide env) | admin-only lifted once cloud-agents isolates them |
 | Stack RBAC | `get` on MCP Secrets | `get` on MCP Secrets + the inference Secret |
@@ -458,17 +440,17 @@ project venv:
 uv run python examples/workflows/verify.py
 ```
 
-What it checks (~185 assertions):
+What it checks (~164 assertions):
 
 - Every file parses; all three definitions pass the real cloud-agents
   `WorkflowDefinition` shape check.
 - `lightspeed-stack.yaml` passes the plan's load-time checks in both stages
   (unknown `executor_type`, `allowed_models: []`, unbound refs, bad defaults,
-  non-default eligible key, request-bound/propagated MCP headers, undefined
+  request-bound/propagated MCP headers, undefined
   policy names), and each of those failures is also pinned as a negative case.
 - `cases.yaml`: accepted requests plus every denial (400 / 403 / 413 / 422)
   for credentials, catalog, policy, spawn, images, advisory, inline MCP,
-  limits and `/query/direct`, in `pre269` and `post269`.
+  and limits, in `pre269` and `post269`.
 - The non-`PLAN` subset validates against the current `Configuration` schema.
 - The real `JwtRolesResolver` / `GenericAccessResolver` give the roles and
   admin semantics the policy assumes.

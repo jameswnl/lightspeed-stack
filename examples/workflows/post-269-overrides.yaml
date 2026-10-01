@@ -9,8 +9,8 @@
 #     hands cloud-agents a short-lived lease per step (redeemed, then released)
 #   - rotation applies at the next lease with no restart; revoking a ref fails
 #     the next step closed (`credential_revoked`)
-#   - secret_headers MCP servers become usable with spawn none/local and on
-#     /query/direct (cloud-agents resolves refs at the last step)
+#   - secret_headers MCP servers become usable with spawn none/local
+#     (cloud-agents resolves refs at the last step)
 #   - the stack ServiceAccount needs `get` on the inference Secret as well
 #     (see k8s-deployment.yaml, the "post-269" Role)
 # Everything else (catalog, policy, request shapes) is identical by design.

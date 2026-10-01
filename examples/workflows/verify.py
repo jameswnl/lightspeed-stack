@@ -175,11 +175,6 @@ for case in cases["workflow_cases"]:
         )
         assert_case(case["name"], stage, status, reasons, case)
 
-for case in cases["direct_cases"]:
-    for stage, cfg in stacks.items():
-        status, reasons = run(gate.submit_direct, cfg, case["body"], set(case["as"]), stage)
-        assert_case("/query/direct: " + case["name"], stage, status, reasons, case)
-
 for case in cases["config_cases"]:
     for stage, cfg in stacks.items():
         if case.get("stage", stage) != stage:
@@ -247,10 +242,7 @@ check(
     not access.check_access(Action.ADMIN, support) and not access.check_access(Action.ADMIN, user),
     "only agent-admin is admin",
 )
-check(
-    access.check_access(Action.ADMIN, admin) and access.check_access(Action.MODEL_OVERRIDE, admin),
-    "admin implies model_override",
-)
+check(access.check_access(Action.ADMIN, admin), "agent-admin is admin")
 
 # ---------------------------------------------------------- 6. deployment
 by_kind: dict[str, list[dict]] = {}

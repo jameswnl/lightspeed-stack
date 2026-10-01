@@ -5,14 +5,17 @@ This folder is a self-contained, end-to-end worked example of the design in
 lightspeed-stack as the sole policy/secret boundary in front of cloud-agents.
 
 > **Status: target state, being built (feature-level TDD).** This folder
-> defines where issue #51 and cloud-agents#269 end up. Phase 0a is in
-> review (PR #57): caller `credentials_secret` -> 400, custom images,
-> `advisory` and `spawn: none/local` need admin -> 403, size and count
-> caps. The `lightspeed-stack.yaml` blocks marked `PLAN(stack#51)` do not
-> load yet, and the catalog/policy behavior in the workflows does not exist
-> yet. `verify.py` pins the contract (see "Verification"); each phase should
-> make more of it real until the whole folder runs against a deployment
-> (Phases 0b–6).
+> defines where issue #51 and cloud-agents#269 end up. Landed so far:
+> Phase 0a (caller `credentials_secret` -> 400; custom images, `advisory`
+> and `spawn: none/local` need admin -> 403; size and count caps) and
+> Phase 1 (the provider catalog, secret registry and defaults load, and
+> `/v1/workflows/run` resolves providers through them: the stack builds the
+> credential reference, the same-entry rule holds, overrides are rewritten to
+> executor types). Blocks marked `PLAN(stack#51)` that belong to later
+> phases (`policy`, MCP `secret_headers` / `workflow_enabled`) do not load
+> yet. `tests/unit/cloud_agents/test_workflow_contract.py` runs `cases.yaml`
+> against the real handler and config for the implemented phases and skips
+> the rest; `verify.py` runs all of it against the reference model.
 
 > **Auth prerequisite.** Role-based policy and the admin gates need an auth
 > module that resolves roles: `jwk-token` with `role_rules` (used here) or
@@ -458,9 +461,13 @@ What it checks (~164 assertions):
   registry, RBAC `resourceNames` match the K8s-bound Secrets, pod hardening,
   digest-pinned images, and the dev and External Secrets sources agree.
 
-`reference_gate.py` is a model of the design, not the implementation. As each
-phase lands, run the same `cases.yaml` against the real endpoint and delete the
-matching part of the reference.
+`reference_gate.py` is a model of the design, not the implementation. Each case
+in `cases.yaml` carries a `phase`. The unit test
+`tests/unit/cloud_agents/test_workflow_contract.py` runs the cases up to
+`IMPLEMENTED_PHASE` against the real handler and `WorkflowEngineConfiguration`
+(status only; `reason` strings belong to the reference) and skips later ones.
+Finishing a phase means raising `IMPLEMENTED_PHASE`, dropping the matching
+`PENDING_ENGINE_KEYS`, and deleting that part of the reference.
 
 ## Production checklist
 

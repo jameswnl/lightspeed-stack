@@ -215,6 +215,22 @@ def _shape_copy(definition: dict) -> dict:
     return shaped
 
 
+def executor_form(stack: dict, definition: dict) -> dict:
+    """Definition as cloud-agents' own validator sees it after the stack's rewrite.
+
+    Logical provider names become executor types and inline registry refs the
+    executor's ``{secret_name, key}`` form (pipeline steps 4 and 6).
+    """
+    out = _shape_copy(definition)
+    catalog = {p["name"]: p["executor_type"] for p in stack["workflow_engine"]["providers"]}
+    scopes = [out] + [s for s in out["spec"]["steps"] if s.get("inference_provider")]
+    for scope in scopes:
+        key = "provider" if scope is out else "inference_provider"
+        if scope.get(key):
+            scope[key]["name"] = catalog.get(scope[key]["name"], scope[key]["name"])
+    return out
+
+
 def submit(
     stack: dict,
     body: dict,

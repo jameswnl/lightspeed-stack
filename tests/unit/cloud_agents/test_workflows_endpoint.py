@@ -19,6 +19,7 @@ from app.endpoints.workflows import (
     start_workflow_handler,
 )
 from models.api.requests.agents import ApproveWorkflowRequest, RunWorkflowRequest
+from models.config import WorkflowEngineConfiguration
 
 
 def _request(mocker: MockerFixture, admin: bool = True) -> Any:
@@ -42,8 +43,7 @@ def reset_executor() -> Generator[None, None, None]:
 def mock_config_fixture(mocker: MockerFixture) -> Any:
     """Mock the configuration singleton."""
     mock_cfg = mocker.patch("app.endpoints.workflows.configuration")
-    mock_cfg.workflow_engine_configuration = mocker.MagicMock()
-    mock_cfg.workflow_engine_configuration.enabled = True
+    mock_cfg.workflow_engine_configuration = WorkflowEngineConfiguration(enabled=True)
     mock_cfg.inference = mocker.MagicMock()
     mock_cfg.inference.default_model = "gpt-4o"
     mock_cfg.inference.default_provider = "openai"
@@ -325,7 +325,7 @@ class TestStartWorkflow:
         mock_executor.start.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_secret_shaped_run_credentials_rejected_with_422(
+    async def test_secret_shaped_run_credentials_rejected_with_400(
         self,
         mocker: MockerFixture,
         mock_config: Any,
@@ -351,7 +351,7 @@ class TestStartWorkflow:
         with pytest.raises(HTTPException) as exc_info:
             await start_workflow_handler.__wrapped__(request, body, auth)
 
-        assert exc_info.value.status_code == 422
+        assert exc_info.value.status_code == 400
         mock_executor.start.assert_not_called()
 
     @pytest.mark.asyncio
@@ -975,3 +975,176 @@ class TestGetTranscripts:
 
         assert result["workflow_id"] == "wf-1"
         assert "analyze" in result["transcripts"]
+
+
+def _governed_engine() -> WorkflowEngineConfiguration:
+    """Catalog used by the governed-mode handler tests."""
+    return WorkflowEngineConfiguration.model_validate(
+        {
+            "enabled": True,
+            "providers": [
+                {
+                    "name": "claude-prod",
+                    "executor_type": "anthropic",
+                    "credential": {"name": "inference/anthropic-prod"},
+                    "allowed_models": ["claude-sonnet-4-5", "claude-haiku-4-5"],
+                },
+                {
+                    "name": "openai-team-b",
+                    "executor_type": "openai",
+                    "credential": {"name": "inference/openai-team-b"},
+                },
+            ],
+            "default_provider": "claude-prod",
+            "default_model": "claude-sonnet-4-5",
+            "secrets": [
+                {
+                    "name": "inference/anthropic-prod",
+                    "backend": "env",
+                    "env": "ANTHROPIC_API_KEY",
+                },
+                {
+                    "name": "inference/openai-team-b",
+                    "backend": "env",
+                    "env": "OPENAI_TEAM_B_KEY",
+                },
+            ],
+        }
+    )
+
+
+class TestStartWorkflowGoverned:
+    """start_workflow_handler against a provider catalog (issue #51, Phase 1)."""
+
+    @pytest.fixture(autouse=True)
+    def _governed(self, mock_config: Any) -> None:
+        """Switch the shared config to governed mode with an ephemeral spawner."""
+        mock_config.workflow_engine_configuration = _governed_engine()
+        mock_config.spawner_configuration = None
+
+    @staticmethod
+    def _definition() -> dict[str, Any]:
+        """One-step workflow on spawn none (the tests run as admin)."""
+        return _valid_definition()
+
+    @pytest.mark.asyncio
+    async def test_default_provider_rebuilt_from_catalog(
+        self, mocker: MockerFixture, mock_executor: Any
+    ) -> None:
+        """No provider sent: the run uses workflow_engine defaults, built by the stack."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-1"
+        body = RunWorkflowRequest(definition=self._definition())
+
+        await start_workflow_handler.__wrapped__(
+            _request(mocker), body, ("u", "n", False, "t")
+        )
+
+        workflow_input = mock_executor.start.call_args[0][0]
+        assert workflow_input["provider"] == {
+            "name": "anthropic",
+            "model": "claude-sonnet-4-5",
+            "credentials_secret": "ANTHROPIC_API_KEY",
+        }
+        assert workflow_input["authz_context"]["provider"] == "claude-prod"
+        assert (
+            workflow_input["authz_context"]["credential_ref"]
+            == "inference/anthropic-prod"
+        )
+
+    @pytest.mark.asyncio
+    async def test_unknown_provider_400_nothing_started(
+        self, mocker: MockerFixture, mock_executor: Any
+    ) -> None:
+        """A name outside the catalog is 400 before anything is persisted."""
+        from fastapi import HTTPException
+
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        body = RunWorkflowRequest(
+            definition=self._definition(), provider={"name": "gpt-x", "model": "m"}
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(
+                _request(mocker), body, ("u", "n", False, "t")
+            )
+        assert exc_info.value.status_code == 400
+        mock_executor.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_overrides_rewritten_and_same_entry_enforced(
+        self, mocker: MockerFixture, mock_executor: Any
+    ) -> None:
+        """definition.provider is rewritten to the executor type in what is started."""
+        from fastapi import HTTPException
+
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-1"
+        definition = self._definition()
+        definition["provider"] = {"name": "claude-prod", "model": "claude-haiku-4-5"}
+        body = RunWorkflowRequest(definition=definition)
+
+        await start_workflow_handler.__wrapped__(
+            _request(mocker), body, ("u", "n", False, "t")
+        )
+        started = mock_executor.start.call_args[0][0]["definition"]
+        assert started["provider"] == {"name": "anthropic", "model": "claude-haiku-4-5"}
+        assert (
+            body.definition["provider"]["name"] == "claude-prod"
+        )  # caller copy intact
+
+        definition["provider"] = {"name": "openai-team-b", "model": "gpt-4o"}
+        with pytest.raises(HTTPException) as exc_info:
+            await start_workflow_handler.__wrapped__(
+                _request(mocker),
+                RunWorkflowRequest(definition=definition),
+                ("u", "n", False, "t"),
+            )
+        assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_legacy_credentials_secret_sets_deprecation_headers(
+        self, mocker: MockerFixture, mock_executor: Any
+    ) -> None:
+        """The deprecated field (logical name only) works but is flagged (RFC 9745/8594)."""
+        from workflow.catalog import LEGACY_DEPRECATION, LEGACY_SUNSET
+
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-1"
+        body = RunWorkflowRequest(
+            definition=self._definition(),
+            provider={
+                "name": "claude-prod",
+                "model": "claude-haiku-4-5",
+                "credentials_secret": "inference/anthropic-prod",  # gitleaks:allow (logical name, not a secret)
+            },
+        )
+
+        response = await start_workflow_handler.__wrapped__(
+            _request(mocker), body, ("u", "n", False, "t")
+        )
+
+        assert response.status_code == 202
+        assert response.headers["Deprecation"] == LEGACY_DEPRECATION
+        assert response.headers["Sunset"] == LEGACY_SUNSET
+        started = mock_executor.start.call_args[0][0]
+        assert started["provider"]["credentials_secret"] == "ANTHROPIC_API_KEY"
+
+    @pytest.mark.asyncio
+    async def test_canonical_form_has_no_deprecation_headers(
+        self, mocker: MockerFixture, mock_executor: Any
+    ) -> None:
+        """The canonical form returns a plain dict."""
+        mocker.patch("app.endpoints.workflows.check_configuration_loaded")
+        mock_executor.start.return_value = "wf-1"
+        body = RunWorkflowRequest(
+            definition=self._definition(),
+            provider={
+                "name": "claude-prod",
+                "model": "claude-haiku-4-5",
+                "credential_ref": {"name": "inference/anthropic-prod"},
+            },
+        )
+        response = await start_workflow_handler.__wrapped__(
+            _request(mocker), body, ("u", "n", False, "t")
+        )
+        assert response == {"workflow_id": "wf-1", "status": "running"}

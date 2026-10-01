@@ -31,6 +31,13 @@ sys.path.insert(0, str(WF_DIR.parent.parent / "src"))
 sys.path.insert(0, str(WF_DIR))
 
 import reference_gate as gate  # noqa: E402
+from contract_util import (  # noqa: E402
+    case_body,
+    deep_merge,
+    load,
+    load_all,
+    patch,
+)
 
 failures: list[str] = []
 
@@ -40,74 +47,6 @@ def check(cond: bool, msg: str) -> None:
     print(("PASS " if cond else "FAIL ") + msg)
     if not cond:
         failures.append(msg)
-
-
-def load(name: str):
-    """Load one YAML document."""
-    with open(WF_DIR / name, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
-
-
-def load_all(name: str) -> list[dict]:
-    """Load a multi-document YAML file."""
-    with open(WF_DIR / name, encoding="utf-8") as fh:
-        return [d for d in yaml.safe_load_all(fh) if d]
-
-
-def deep_merge(base, over):
-    """Maps merge, everything else (lists, scalars) is replaced."""
-    if isinstance(base, dict) and isinstance(over, dict):
-        out = dict(base)
-        for key, value in over.items():
-            out[key] = deep_merge(base[key], value) if key in base else value
-        return out
-    return copy.deepcopy(over)
-
-
-def _key(container, token):
-    """Resolve a path token: dict key, list index, or list item by name."""
-    if isinstance(container, list):
-        if token.isdigit():
-            return int(token)
-        for i, item in enumerate(container):
-            if isinstance(item, dict) and item.get("name") == token:
-                return i
-        raise KeyError(token)
-    return token
-
-
-def patch(doc, patches):
-    """Return a copy of ``doc`` with dotted-path ``patches`` applied."""
-    doc = copy.deepcopy(doc)
-    for path, value in (patches or {}).items():
-        tokens = path.split(".")
-        cur = doc
-        for tok in tokens[:-1]:
-            k = _key(cur, tok)
-            if isinstance(cur, dict) and k not in cur:
-                cur[k] = {}
-            cur = cur[k]
-        cur[_key(cur, tokens[-1])] = value
-    return doc
-
-
-def generate(definition, spec):
-    """Build oversized inputs for the limit cases."""
-    steps = definition["spec"]["steps"]
-    if "pad_bytes" in spec:
-        definition["metadata"]["padding"] = "x" * spec["pad_bytes"]
-    while len(steps) < spec.get("steps", 0):
-        clone = copy.deepcopy(steps[0])
-        clone["name"] = f"gen{len(steps)}"
-        steps.append(clone)
-    if "mcp_servers" in spec:
-        definition["spec"]["mcp_servers"] = [f"srv{i}" for i in range(spec["mcp_servers"])]
-    if "secret_headers" in spec:
-        server = steps[0]["mcp_servers"][0]
-        server["secret_headers"] = {
-            f"H{i}": {"name": "mcp/incidents"} for i in range(spec["secret_headers"])
-        }
-    return definition
 
 
 # ---------------------------------------------------------------- 1. parsing
@@ -128,6 +67,12 @@ from cloud_agents.workflow.core.definition import WorkflowDefinition  # noqa: E4
 for name, raw in definitions.items():
     WorkflowDefinition.model_validate(gate._shape_copy(raw))  # pylint: disable=W0212
     check(True, f"{name}: WorkflowDefinition shape valid")
+
+from cloud_agents.workflow.core.validation import validate_definition  # noqa: E402
+
+for name, raw in definitions.items():
+    problems = validate_definition(gate.executor_form(stacks["pre269"], raw))
+    check(problems == [], f"{name}: passes cloud-agents validate_definition {problems}")
 
 # ------------------------------------------------------------ 2. load checks
 for stage, cfg in stacks.items():
@@ -157,14 +102,9 @@ def assert_case(label, stage, got, reasons, case):
 
 
 for case in cases["workflow_cases"]:
-    base = definitions[case["workflow"]]
     dflt = cases["defaults"][case["workflow"]]
     for stage, cfg in stacks.items():
-        definition = generate(patch(base, case.get("set")), case.get("generate", {}))
-        body = patch(
-            {"definition": definition, "provider": copy.deepcopy(dflt["provider"])},
-            case.get("body_set"),
-        )
+        body = case_body(case, definitions, cases["defaults"])
         status, reasons = run(
             gate.submit,
             cfg,

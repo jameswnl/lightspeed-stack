@@ -1793,7 +1793,7 @@ wheels = [
 [[package]]
 name = "lightspeed-cloud-agents"
 version = "0.1.0"
-source = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git?rev=b5a1902fb34a99492ba8c3b37580246e27890a60#b5a1902fb34a99492ba8c3b37580246e27890a60" }
+source = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git?rev=1194ff005ac31d26a0816745a06b41c174947949#1194ff005ac31d26a0816745a06b41c174947949" }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
@@ -1957,7 +1957,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "jsonpath-ng", specifier = ">=1.6.1" },
     { name = "kubernetes", specifier = ">=30.1.0" },
-    { name = "lightspeed-cloud-agents", extras = ["kubernetes", "local", "openshell"], git = "https://github.com/jameswnl/lightspeed-cloud-agents.git?rev=b5a1902fb34a99492ba8c3b37580246e27890a60" },
+    { name = "lightspeed-cloud-agents", extras = ["kubernetes", "local", "openshell"], git = "https://github.com/jameswnl/lightspeed-cloud-agents.git?rev=1194ff005ac31d26a0816745a06b41c174947949" },
     { name = "litellm", specifier = ">=1.83.7" },
     { name = "ogx", specifier = "==1.0.2" },
     { name = "ogx-api", specifier = "==1.0.2" },

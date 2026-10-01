@@ -1,0 +1,110 @@
+# =============================================================================
+# kb-answer-with-approval.yaml — caller-authored workflow definition.
+#
+# Flow: research (search the KB via MCP) -> review (human approval gate) ->
+# respond (draft the customer answer from the approved findings).
+#
+# Logical names used here must exist in lightspeed-stack.yaml and be granted
+# to the caller's roles by workflow_engine.policy:
+#   provider openai-team-b  (roles: agent-support)
+#   MCP server kb-search    (roles: agent-support)
+#   skill kb-search         (roles: agent-support)
+#   spawn ephemeral, image = spawner default, service account kb-runner
+#
+# Same-entry rule (PLAN(stack#51)): definition.provider and every step
+# inference_provider must resolve to the SAME catalog entry as the run-level
+# provider. The model may differ per step, as `research` shows below.
+#
+# Trigger:
+#   POST /v1/workflows/run  (see README.md), then approve the gate with
+#   POST /v1/workflows/{id}/approve  {"step_name": "review", ...}
+# =============================================================================
+apiVersion: cloudagents/v1
+kind: AgentWorkflow
+metadata:
+  name: kb-answer-with-approval
+  description: Research the knowledge base, get human approval, answer the customer.
+
+# Workflow-level provider default. Must be the same catalog entry as the
+# run-level provider (openai-team-b); counts as an override and is checked.
+provider:
+  name: openai-team-b
+  model: gpt-4o
+  # NOTE: no credentials_secret — caller-sent credential references are
+  # rejected (400). The stack rebuilds the provider dict from the catalog.
+
+spec:
+  input_prompt: "Customer asks: how do I rotate the database credentials for my deployment?"
+
+  spawn: ephemeral
+  service_account: kb-runner
+  timeout_seconds: 1200
+  mcp_servers:
+    - kb-search
+
+  steps:
+    - name: research
+      type: agent
+      agent: kb-research-agent
+      prompt: >-
+        Search the knowledge base for documents answering the customer
+        question in the workflow input. Return the 5 most relevant passages
+        with document IDs and a 3-bullet extractive summary. Respond with
+        JSON matching the step output schema.
+      output_key: findings
+      output_schema:
+        type: object
+        required: [passages, summary_bullets]
+        properties:
+          passages:
+            type: array
+            items:
+              type: object
+              required: [doc_id, passage]
+              properties:
+                doc_id: {type: string}
+                passage: {type: string}
+          summary_bullets:
+            type: array
+            items: {type: string}
+      # Same catalog entry as the run provider, cheaper model for retrieval.
+      inference_provider:
+        name: openai-team-b
+        model: gpt-4o-mini
+      allowed_skills:
+        - kb-search
+      tools:
+        - kb.search
+      target_namespaces:
+        - sandbox-workloads
+      timeout_seconds: 600
+      max_retries: 1
+      permissions:
+        max_tokens: 100000
+
+    - name: review
+      type: human-approval
+      message: >-
+        Review the KB findings for the customer question before an answer
+        is drafted. Approve to continue, reject to stop the workflow.
+      output_key: decision
+
+    - name: respond
+      type: agent
+      agent: kb-research-agent
+      prompt: >-
+        Draft a customer-facing answer (under 250 words) from these approved
+        findings: {{ steps.research.output.findings }}
+        Cite document IDs. No tool calls needed.
+      output_key: answer
+      output_schema:
+        type: object
+        required: [answer_markdown]
+        properties:
+          answer_markdown: {type: string}
+      # Inherits openai-team-b / gpt-4o from definition.provider; needs no
+      # MCP access to draft from already-approved findings.
+      mcp_servers: []
+      timeout_seconds: 300
+      permissions:
+        max_tokens: 20000

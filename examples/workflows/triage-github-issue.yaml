@@ -1,0 +1,84 @@
+# =============================================================================
+# triage-github-issue.yaml — caller-authored workflow definition.
+#
+# Flow: triage (classify the issue via GitHub MCP) -> report (write the
+# triage report from the classification, no tools needed).
+#
+# Logical names used here must exist in lightspeed-stack.yaml and be granted
+# to the caller's roles by workflow_engine.policy:
+#   provider claude-prod / model claude-sonnet-4-5  (roles: agent-user)
+#   MCP server github-readonly                      (roles: agent-user)
+#   skill triage                                    (roles: agent-user)
+#   spawn ephemeral, image = spawner default, service account workflow-runner
+#
+# Trigger (run-level provider + input travel in the API request, not here):
+#   POST /v1/workflows/run  (see README.md for the full curl)
+# =============================================================================
+apiVersion: cloudagents/v1
+kind: AgentWorkflow
+metadata:
+  name: triage-github-issue
+  description: Classify a GitHub issue and write a triage report.
+
+spec:
+  input_prompt: "Triage GitHub issue https://github.com/example/repo/issues/1234"
+
+  # Workflow-level defaults: every step inherits these unless it overrides.
+  spawn: ephemeral
+  service_account: workflow-runner
+  timeout_seconds: 900
+  mcp_servers:
+    - github-readonly
+  allowed_skills:
+    - triage
+
+  steps:
+    - name: triage
+      type: agent
+      agent: triage-agent
+      prompt: >-
+        Read the GitHub issue in the workflow input using the github tools.
+        Classify it with severity (critical/high/medium/low), area
+        (backend/frontend/docs/infra), and a one-paragraph summary.
+        Respond with JSON matching the step output schema.
+      output_key: classification
+      output_schema:
+        type: object
+        required: [severity, area, summary]
+        properties:
+          severity: {type: string, enum: [critical, high, medium, low]}
+          area: {type: string, enum: [backend, frontend, docs, infra]}
+          summary: {type: string}
+      tools:
+        - github.read
+      target_namespaces:
+        - sandbox-workloads
+      timeout_seconds: 600
+      max_retries: 2
+      permissions:
+        max_tokens: 50000
+      # inference_provider omitted: inherits the run-level provider
+      # (claude-prod). Inherited steps are not re-checked; the run-level
+      # check covers them.
+
+    - name: report
+      type: agent
+      agent: triage-agent
+      prompt: >-
+        Write a markdown triage report from this classification:
+        {{ steps.triage.output.classification }}
+        Keep it under 300 words. No tool calls needed.
+      output_key: report
+      output_schema:
+        type: object
+        required: [report_markdown]
+        properties:
+          report_markdown: {type: string}
+      # Explicitly empty: [] means "none", while omitting the field would
+      # inherit the workflow defaults above. The report step needs neither
+      # MCP access nor skills.
+      mcp_servers: []
+      allowed_skills: []
+      timeout_seconds: 300
+      permissions:
+        max_tokens: 20000

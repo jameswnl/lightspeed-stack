@@ -1,0 +1,201 @@
+# =============================================================================
+# lightspeed-stack.yaml — operator configuration for K8s (namespace: lightspeed)
+#
+# Covers the catalog items needed by the two example workflows in this
+# directory:
+#   - triage-github-issue.yaml     (roles: agent-user)
+#   - kb-answer-with-approval.yaml (roles: agent-support)
+#
+# Blocks marked PLAN(stack#51) are proposed by
+# https://github.com/jameswnl/lightspeed-stack/issues/51#issuecomment-5911977694
+# and do not load on the current schema yet. Everything else is valid today.
+# Secret VALUES live only in k8s-secrets.yaml / the Deployment env — this file
+# holds backend bindings (env var names, K8s Secret names), never values.
+# =============================================================================
+name: Lightspeed Core Stack (workflows on K8s)
+
+service:
+  host: 0.0.0.0
+  port: 8080
+  auth_enabled: true
+  workers: 2
+  color_log: false
+  access_log: true
+
+llama_stack:
+  use_as_library_client: false
+  url: http://llama-stack.lightspeed.svc:8321
+
+user_data_collection:
+  feedback_enabled: true
+  feedback_storage: /data/feedback
+  transcripts_enabled: true
+  transcripts_storage: /data/transcripts
+
+# Llama Stack-side defaults. Once PLAN(stack#51) lands, these apply to
+# Llama Stack-backed endpoints (/query, /responses) only; cloud-agents paths
+# use workflow_engine.default_* instead.
+inference:
+  default_provider: openai
+  default_model: gpt-4o-mini
+
+database:
+  postgres:
+    host: postgres.lightspeed.svc
+    port: 5432
+    db: lightspeed
+    user: lightspeed
+    password: "${env.POSTGRES_PASSWORD}"
+    namespace: public
+    # ssl_mode: prefer  # enable for production Postgres
+
+# Role-based policy needs real roles. The k8s, noop and api-key modules use
+# no-op resolvers (no roles beyond "*", access_rules ignored, every caller
+# counts as admin), so this example uses jwk-token with role_rules.
+authentication:
+  module: jwk-token
+  skip_for_health_probes: true
+  skip_for_metrics: true
+  jwk_config:
+    url: https://keycloak.example.com/realms/lightspeed/protocol/openid-connect/certs
+    jwt_configuration:
+      user_id_claim: sub
+      username_claim: preferred_username
+      role_rules:
+        - jsonpath: "$.realm_access.roles[*]"
+          operator: contains
+          value: lightspeed-agent-user
+          roles: [agent-user]
+        - jsonpath: "$.realm_access.roles[*]"
+          operator: contains
+          value: lightspeed-agent-support
+          roles: [agent-support]
+        - jsonpath: "$.realm_access.roles[*]"
+          operator: contains
+          value: lightspeed-agent-admin
+          roles: [agent-admin]
+
+# Coarse RBAC: "may submit / view / approve / cancel at all".
+# An access rule with the `admin` action cannot list other actions (config
+# load fails); `admin` implies every other action.
+# Fine-grained "may use THIS provider/MCP/skill/spawn/image" lives in
+# workflow_engine.policy (PLAN(stack#51)) below.
+authorization:
+  access_rules:
+    - role: agent-user
+      actions: [workflow_start, workflow_view, workflow_cancel]
+    - role: agent-support
+      actions: [workflow_start, workflow_view, workflow_approve, workflow_cancel]
+    - role: agent-admin
+      actions: [admin]
+
+# ---------------------------------------------------------------------------
+# MCP catalog. The stack owns URL/transport/TLS/headers/secrets/egress here;
+# callers only send the logical `name`.
+# ---------------------------------------------------------------------------
+mcp_servers:
+  - name: github-readonly
+    provider_id: model-context-protocol
+    url: https://mcp.internal.example.com/github
+    workflow_enabled: true            # PLAN(stack#51): opt in to workflow use
+    secret_headers:                   # PLAN(stack#51): header -> registry ref
+      Authorization: {name: mcp/github-readonly}
+  - name: kb-search
+    provider_id: model-context-protocol
+    url: https://mcp.internal.example.com/kb
+    workflow_enabled: true            # PLAN(stack#51)
+    secret_headers:                   # PLAN(stack#51)
+      X-API-Key: {name: mcp/kb-search}
+
+# ---------------------------------------------------------------------------
+# Workflow engine + PLAN(stack#51) catalogs and policy.
+# ---------------------------------------------------------------------------
+workflow_engine:
+  enabled: true
+  max_concurrent_workflows: 10
+  transcript_retention_days: 30
+
+  # PLAN(stack#51): provider catalog. Non-empty = governed mode, unknown names deny.
+  providers:
+    - name: claude-prod              # logical name callers send
+      executor_type: anthropic       # must be in APPROVED_INFERENCE_PROVIDERS
+      credential: {name: inference/anthropic-prod}   # exactly one per entry
+      allowed_models: [claude-sonnet-4-5, claude-haiku-4-5]  # null = any; [] = load failure
+      direct_query_eligible: true    # may be used on /query/direct (spawn: none)
+    - name: openai-team-b
+      executor_type: openai
+      credential: {name: inference/openai-team-b}
+      # allowed_models omitted (null) = any model
+
+  # PLAN(stack#51): defaults for cloud-agents paths (workflows, /query/direct).
+  default_provider: claude-prod
+  default_model: claude-sonnet-4-5
+
+  # PLAN(stack#51): logical ref -> backend binding. Operator-only.
+  secrets:
+    - name: inference/anthropic-prod
+      backend: env                   # must be env pre-cloud-agents#269
+      env: ANTHROPIC_API_KEY         # injected from Secret lightspeed-inference-creds
+    - name: inference/openai-team-b
+      backend: env
+      env: OPENAI_TEAM_B_KEY
+    - name: mcp/github-readonly
+      backend: k8s
+      secret_name: mcp-github-readonly-token
+      key: token
+    - name: mcp/kb-search
+      backend: k8s
+      secret_name: mcp-kb-search-token
+      key: api-key
+
+  # PLAN(stack#51): per-role grants. Union of matching rules; default deny.
+  policy:
+    rules:
+      # Triage flow (triage-github-issue.yaml)
+      - roles: [agent-user]
+        providers: [claude-prod]
+        mcp_servers: [github-readonly]
+        mcp_secrets: [mcp/github-readonly]
+        spawn: [ephemeral]
+        sandbox_images: [quay.io/example/lightspeed-agentic-sandbox:1.4]
+        skills: [triage]
+        tools: [github.read]
+        service_accounts: [workflow-runner]
+        namespaces: [sandbox-workloads]
+        limits: {max_timeout_seconds: 900, max_tokens: 200000, max_retries: 2}
+      # KB answer flow (kb-answer-with-approval.yaml)
+      - roles: [agent-support]
+        providers: [openai-team-b]
+        mcp_servers: [kb-search]
+        mcp_secrets: [mcp/kb-search]
+        spawn: [ephemeral]
+        sandbox_images: [quay.io/example/lightspeed-agentic-sandbox:1.4]
+        skills: [kb-search]
+        tools: [kb.search]
+        service_accounts: [kb-runner]
+        namespaces: [sandbox-workloads]
+        limits: {max_timeout_seconds: 1200, max_tokens: 200000, max_retries: 1}
+      - roles: [agent-admin]
+        inherit: [agent-user, agent-support]
+        providers: [claude-prod, openai-team-b]
+        spawn: [ephemeral, local, none]
+        inline_mcp: true
+        inline_mcp_hosts: [mcp.internal.example.com]
+        advisory: true
+
+# ---------------------------------------------------------------------------
+# Ephemeral spawner: OpenShell gateway. Sandboxes get credentials via OpenShell
+# provider injection (placeholder in sandbox env, value in supervisor proxy).
+# The sandbox image also carries /skills/triage and /skills/kb-search
+# (see README.md). Requires PLAN(stack#51) policy + secrets above for full
+# governance; spawner fields themselves are current schema.
+# ---------------------------------------------------------------------------
+spawner:
+  type: openshell
+  openshell_gateway_url: "openshell-gateway.lightspeed.svc:443"
+  openshell_workspace: lcore-prod
+  sandbox_image: quay.io/example/lightspeed-agentic-sandbox:1.4
+  openshell_tls_ca: /etc/openshell-tls/ca.crt
+  openshell_tls_cert: /etc/openshell-tls/tls.crt
+  openshell_tls_key: /etc/openshell-tls/tls.key
+  max_pods: 50

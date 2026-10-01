@@ -14,14 +14,12 @@ graph TB
             a2a["/a2a"]
         end
         subgraph new["New Endpoints"]
-            qd["/query/direct"]
-            qds["/query/direct/stream"]
             wf["/workflows/*"]
             at["/agent-tools"]
         end
 
         existing -->|build_agent| llamastack["Llama Stack"]
-        new --> bridge["query_executor.py\nvalidate + build StepInput"]
+        new --> bridge["workflow/\nstorage + executor_factory"]
     end
 
     bridge --> dispatch["get_step_executor()"]
@@ -222,7 +220,6 @@ graph TB
     end
 
     subgraph bridge["Bridge Layer (lightspeed-stack src/workflow/)"]
-        qe["query_executor.py"]
         storage["storage.py"]
         ef["executor_factory.py"]
     end
@@ -264,8 +261,6 @@ graph TB
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/v1/query/direct` | POST | Blocking query via DirectExecutor |
-| `/v1/query/direct/stream` | POST | SSE streaming query |
 | `/v1/workflows/run` | POST | Start a workflow (multi-step, or one-step for one-shot agent runs) |
 | `/v1/workflows/{id}` | GET | Get workflow status |
 | `/v1/workflows/{id}/approve` | POST | Approve a paused step |
@@ -375,6 +370,10 @@ graph LR
     style future fill:#e8f5e9,stroke:#4caf50
 ```
 
+> **Deferred:** the `/v1/query/direct` endpoints were removed to keep the
+> workflow work focused; bring-back is tracked in jameswnl/lightspeed-stack#59.
+> The status below describes the design target, not shipped endpoints.
+
 ### What's Done
 
 | Component | Status |
@@ -475,7 +474,6 @@ Blue = cloud-agents. Orange = lightspeed-stack. Red = final migration steps.
 
 | Component | Multi-pod safe? | Notes |
 |---|---|---|
-| `/query/direct` | Yes | Stateless per call |
 | Conversation state | Yes (PostgreSQL) | Shared database |
 | Workflow state | Yes (PostgreSQL) | Shared database |
 | Running workflow tasks | No (in-memory) | Use Temporal for crash recovery |

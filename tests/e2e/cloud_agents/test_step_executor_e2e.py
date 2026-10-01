@@ -342,20 +342,3 @@ class TestStepResultShape:
         assert result.status == "completed"
         assert isinstance(result.transcript, list)
         assert len(result.transcript) >= 1
-
-
-class TestPromptValidation:
-    """Validation helpers used by the step-executor path.
-
-    Note: this doesn't exercise the step-executor itself, just the
-    private `_validate_prompt()` function it (and query_direct_handler)
-    call before dispatching -- arguably a tests/unit candidate rather
-    than e2e, kept here as-is pending a separate decision on moving it.
-    """
-
-    def test_stream_validation_error(self) -> None:
-        """Validation helpers raise on invalid input."""
-        from workflow.query_executor import _validate_prompt
-
-        with pytest.raises(ValueError, match="maximum length"):
-            _validate_prompt("x" * 200_000)

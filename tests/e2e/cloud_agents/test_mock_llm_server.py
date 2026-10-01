@@ -169,10 +169,16 @@ def test_tool_script_second_turn_returns_final_text() -> None:
                 "model": "gpt-4o",
                 "input": [
                     {
+                        "type": "function_call",
+                        "call_id": "call_mock_1",
+                        "name": "parity_probe",
+                        "arguments": "{}",
+                    },
+                    {
                         "type": "function_call_output",
                         "call_id": "call_mock_1",
                         "output": "42",
-                    }
+                    },
                 ],
                 "tools": [
                     {
@@ -204,5 +210,77 @@ def test_tool_script_without_tools_falls_back_to_text() -> None:
         )
         parsed = Response.model_validate(result.json())
         assert _first_output_text(parsed) == DEFAULT_RESPONSE_TEXT
+    finally:
+        server.stop()
+
+
+def test_orphan_function_call_output_rejected_with_400() -> None:
+    """A tool result whose call_id matches no tool call is rejected.
+
+    Mirrors provider behavior (OpenAI function_call_output.call_id /
+    Anthropic tool_result.tool_use_id) so conversation-history replay
+    bugs -- e.g. mismatched synthesized call/result ids -- fail loudly
+    against the mock instead of only against a real provider.
+    """
+    server = MockResponsesServer()
+    server.start()
+    try:
+        result = httpx.post(
+            f"{server.base_url}/responses",
+            json={
+                "model": "gpt-4o",
+                "input": [
+                    # A tool result for a call that is NOT in this request.
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_missing_1",
+                        "output": "42",
+                    }
+                ],
+            },
+            timeout=5.0,
+        )
+        assert result.status_code == 400
+        assert "call_missing_1" in result.json()["error"]["message"]
+    finally:
+        server.stop()
+
+
+def test_matched_function_call_output_not_rejected() -> None:
+    """A tool result paired with its call in the same request passes."""
+    server = MockResponsesServer(
+        tool_call={"name": "parity_probe", "arguments": {}, "result_text": "done"}
+    )
+    server.start()
+    try:
+        result = httpx.post(
+            f"{server.base_url}/responses",
+            json={
+                "model": "gpt-4o",
+                "input": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_ok_1",
+                        "name": "parity_probe",
+                        "arguments": "{}",
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_ok_1",
+                        "output": "42",
+                    },
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "parity_probe",
+                        "parameters": {"type": "object"},
+                    }
+                ],
+            },
+            timeout=5.0,
+        )
+        parsed = Response.model_validate(result.json())
+        assert _first_output_text(parsed) == "done"
     finally:
         server.stop()

@@ -26,6 +26,41 @@ DB_URL = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}"
 
 PROVIDER = {"name": "openai", "model": "gpt-4o-mini"}
 
+# Canonical transcript contract (issue #52): event data keys per type,
+# mirroring the sandbox EventLogger (lightspeed-agentic-sandbox
+# src/lightspeed_agentic/logging.py) -- the same for every spawn mode.
+CANONICAL_EVENT_DATA_KEYS: dict[str, set[str]] = {
+    "thinking": {"text"},
+    "tool_call": {"name", "input"},
+    "tool_result": {"output"},
+    "result": {"text", "cost_usd", "input_tokens", "output_tokens"},
+    "error": {"message"},
+}
+
+
+def assert_canonical_events(events: list[dict[str, Any]]) -> None:
+    """Assert a transcript's events carry the canonical shape and data keys.
+
+    Shared by the none/local/ephemeral transcript assertions so all
+    spawn modes are checked against the identical contract: every event
+    is ``{"ts", "type", "data"}`` with a type from the canonical
+    vocabulary and exactly the contract's ``data`` keys for that type.
+
+    Parameters:
+        events: Transcript event dicts (e.g. from
+            ``GET /v1/workflows/{id}/transcripts`` or
+            ``get_step_transcripts``).
+
+    Raises:
+        AssertionError: On any non-canonical event.
+    """
+    assert events, "expected a non-empty transcript"
+    for event in events:
+        assert set(event.keys()) == {"ts", "type", "data"}, event
+        event_type = event["type"]
+        assert event_type in CANONICAL_EVENT_DATA_KEYS, event
+        assert set(event["data"].keys()) == CANONICAL_EVENT_DATA_KEYS[event_type], event
+
 
 def two_step_definition(workflow_name: str) -> dict[str, Any]:
     """A minimal 2-step, spawn:none, no-approval workflow definition.

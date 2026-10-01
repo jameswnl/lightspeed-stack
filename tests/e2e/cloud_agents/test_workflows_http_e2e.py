@@ -40,6 +40,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from .conftest import postgres_reachable, skip_if_gateway_unreachable, wait_for_status
+from .workflow_e2e_helpers import assert_canonical_events
 
 pytestmark = [
     pytest.mark.skipif(
@@ -382,20 +383,10 @@ class TestWorkflowHttpE2E:
         )
         assert transcripts_response.status_code == 200
         # Canonical transcript contract (issue #52): the same per-event
-        # shape as spawn:none/local -- {"ts", "type", "data"} events from
-        # the canonical vocabulary.
+        # shape AND data keys as spawn:none/local -- checked against the
+        # shared EventLogger-derived contract for all modes.
         transcript = transcripts_response.json()["transcripts"]["investigate_result"]
-        events = transcript["events"]
-        assert events, "ephemeral transcript should not be empty"
-        for event in events:
-            assert set(event.keys()) == {"ts", "type", "data"}
-            assert event["type"] in {
-                "tool_call",
-                "tool_result",
-                "thinking",
-                "result",
-                "error",
-            }
+        assert_canonical_events(transcript["events"])
 
 
 class TestOneStepWorkflowHttpE2E:
@@ -461,30 +452,14 @@ class TestOneStepWorkflowHttpE2E:
             f"/v1/workflows/{workflow_id}/transcripts"
         )
         assert transcripts_response.status_code == 200
-        # Canonical transcript contract (issue #52): every event is
-        # {"ts", "type", "data"} with a type from the canonical
-        # vocabulary -- same shape as spawn:local/ephemeral. A no-tool
-        # spawn:none run yields exactly one aggregate result event.
+        # Canonical transcript contract (issue #52): shared shape AND
+        # data-key checks across all spawn modes. A no-tool spawn:none
+        # run yields exactly one aggregate result event.
         transcript = transcripts_response.json()["transcripts"]["result"]
         events = transcript["events"]
-        assert events, "one-step transcript should not be empty"
-        for event in events:
-            assert set(event.keys()) == {"ts", "type", "data"}
-            assert event["type"] in {
-                "tool_call",
-                "tool_result",
-                "thinking",
-                "result",
-                "error",
-            }
+        assert_canonical_events(events)
         result_events = [e for e in events if e["type"] == "result"]
         assert len(result_events) == 1
-        assert set(result_events[0]["data"]) == {
-            "text",
-            "cost_usd",
-            "input_tokens",
-            "output_tokens",
-        }
 
     def test_secret_bearing_definition_rejected_with_422(
         self, http_client: TestClient

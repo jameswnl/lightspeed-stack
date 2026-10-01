@@ -119,21 +119,59 @@ def _input_has_function_call_output(request_body: dict[str, Any]) -> bool:
     signal to stop scripting a tool call and answer with final text.
     Non-list input shapes (str, None, or unexpected truthy values) are
     treated as "no tool results yet".
+
+    Note: this scans the WHOLE input, so in a multi-turn chat where an
+    earlier function_call_output stays in history, the mock answers
+    every subsequent turn with text -- it scripts at most one tool call
+    per conversation.
     """
     input_value = request_body.get("input")
     if not isinstance(input_value, list):
         return False
+    return any(
+        isinstance(item, dict) and item.get("type") == "function_call_output"
+        for item in input_value
+    )
+
+
+def _orphan_function_call_output_id(request_body: dict[str, Any]) -> Optional[str]:
+    """Return the call_id of a tool result with no matching tool call, if any.
+
+    Providers (OpenAI function_call_output.call_id, Anthropic
+    tool_result.tool_use_id) reject a tool result whose id matches no
+    tool call in the same request. The mock enforces the same rule so
+    replayed-history bugs (e.g. mismatched synthesized ids) fail loudly
+    here instead of only against a real provider.
+
+    Returns:
+        The orphan call_id, or None when every function_call_output has
+        a matching function_call item (or the input carries no tool
+        results).
+    """
+    input_value = request_body.get("input")
+    if not isinstance(input_value, list):
+        return None
+    call_ids = {
+        item.get("call_id")
+        for item in input_value
+        if isinstance(item, dict) and item.get("type") == "function_call"
+    }
     for item in input_value:
-        if isinstance(item, dict) and item.get("type") == "function_call_output":
-            return True
-    return False
+        if (
+            isinstance(item, dict)
+            and item.get("type") == "function_call_output"
+            and item.get("call_id") not in call_ids
+        ):
+            return str(item.get("call_id"))
+    return None
 
 
 class _ResponsesHandler(BaseHTTPRequestHandler):
     """Handles POST /v1/responses with a canned response body."""
 
-    response_text: str
+    response_text: str = DEFAULT_RESPONSE_TEXT
     tool_call: Optional[dict[str, Any]] = None
+    captured_requests: Optional[list[dict[str, Any]]] = None
 
     def log_message(  # pylint: disable=arguments-differ
         self, format_: str, *args: Any
@@ -176,6 +214,33 @@ class _ResponsesHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             request_body = {}
 
+        if self.captured_requests is not None:
+            self.captured_requests.append(request_body)
+
+        # Provider-strict tool-result validation: a function_call_output
+        # whose call_id matches no function_call in the same request is
+        # what real providers reject -- surface it as a 400 so replayed
+        # conversation-history bugs fail loudly here.
+        orphan_call_id = _orphan_function_call_output_id(request_body)
+        if orphan_call_id is not None:
+            payload = json.dumps(
+                {
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": (
+                            "function_call_output with call_id "
+                            f"'{orphan_call_id}' has no matching function_call"
+                        ),
+                    }
+                }
+            ).encode()
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
         payload = json.dumps(self._select_body(request_body)).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -199,6 +264,7 @@ class MockResponsesServer:
         self,
         response_text: str = DEFAULT_RESPONSE_TEXT,
         tool_call: Optional[dict[str, Any]] = None,
+        capture_requests: bool = False,
     ) -> None:
         """Build the server (not yet listening -- call start()).
 
@@ -206,11 +272,19 @@ class MockResponsesServer:
             response_text: Canned final text for plain requests.
             tool_call: Optional script dict with "name", "arguments",
                 and "result_text" keys enabling tool-call scripting.
+            capture_requests: When true, record every parsed request
+                body in ``requests`` (thread-safe append) so tests can
+                assert on what pydantic-ai actually sent.
         """
+        self.requests: list[dict[str, Any]] = []
         handler = type(
             "_BoundResponsesHandler",
             (_ResponsesHandler,),
-            {"response_text": response_text, "tool_call": tool_call},
+            {
+                "response_text": response_text,
+                "tool_call": tool_call,
+                "captured_requests": self.requests if capture_requests else None,
+            },
         )
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)

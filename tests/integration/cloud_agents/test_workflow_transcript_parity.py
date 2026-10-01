@@ -13,10 +13,11 @@ Run from the repository root (the spawn:local subprocess child resolves
 """
 
 # pylint: disable=too-many-locals
-
 from __future__ import annotations
 
 import asyncio
+import os
+from pathlib import Path
 from typing import Any, Optional
 
 import pytest
@@ -28,6 +29,7 @@ from cloud_agents.workflow.core.models import (
 from cloud_agents.workflow.executor.local.executor import LocalWorkflowRunner
 
 from tests.e2e.cloud_agents.mock_llm_server import MockResponsesServer
+from tests.e2e.cloud_agents.workflow_e2e_helpers import assert_canonical_events
 
 CANONICAL_EVENT_TYPES = {"tool_call", "tool_result", "thinking", "result", "error"}
 
@@ -156,6 +158,7 @@ class InMemoryTranscriptStore:  # pylint: disable=too-few-public-methods
     def __init__(self) -> None:
         """Start with no saved transcripts."""
         self.saved: dict[str, dict[str, StepTranscript]] = {}
+        self.turn_messages: dict[str, list[tuple[str, list[dict[str, Any]]]]] = {}
 
     async def save(  # pylint: disable=unused-argument
         self,
@@ -167,6 +170,9 @@ class InMemoryTranscriptStore:  # pylint: disable=too-few-public-methods
     ) -> None:
         """Save a step transcript in insertion order."""
         self.saved.setdefault(workflow_id, {})[step_name] = transcript
+        self.turn_messages.setdefault(workflow_id, []).append(
+            (step_name, messages or [])
+        )
 
     async def get(self, workflow_id: str, step_name: str) -> Optional[StepTranscript]:
         """Return a saved transcript, or None."""
@@ -176,24 +182,52 @@ class InMemoryTranscriptStore:  # pylint: disable=too-few-public-methods
         """List saved step names in save order."""
         return list(self.saved.get(workflow_id, {}))
 
+    async def load_recent_turns(
+        self, workflow_id: str, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Return the most recent turns as step_name/messages dicts."""
+        turns = self.turn_messages.get(workflow_id, [])
+        return [
+            {"step_name": step_name, "messages": messages}
+            for step_name, messages in turns[-limit:]
+        ]
+
 
 class ParityEnv:  # pylint: disable=too-few-public-methods
     """Mock LLM server + env wiring shared by spawn:none and spawn:local."""
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capture_requests: bool = False,
+        q: int = 7,
+    ) -> None:
         """Start the scripted server and point the stack's env at it."""
         self.server = MockResponsesServer(
             tool_call={
                 "name": PARITY_TOOL,
-                "arguments": {"q": 7},
+                "arguments": {"q": q},
                 "result_text": "parity final answer",
-            }
+            },
+            capture_requests=capture_requests,
         )
         self.server.start()
         monkeypatch.setenv("OPENAI_BASE_URL", self.server.base_url)
         monkeypatch.setenv("OPENAI_API_KEY", "parity-test-dummy-key")
         monkeypatch.setenv(
             "CLOUD_AGENTS_TOOLS_MODULE", "tests.integration.cloud_agents.parity_tools"
+        )
+        # The spawn:local subprocess child must import the parity tools
+        # module. It currently inherits this process's environment and
+        # working directory (repo root) -- explicit PYTHONPATH makes the
+        # import independent of cwd. If cloud-agents #269 trims the
+        # child env (lightspeed-stack #51 gap G8), these tests will need
+        # the trimmed-but-allowlisted equivalents.
+        repo_root = str(Path(__file__).resolve().parents[3])
+        existing = os.environ.get("PYTHONPATH")
+        monkeypatch.setenv(
+            "PYTHONPATH",
+            f"{repo_root}{os.pathsep}{existing}" if existing else repo_root,
         )
 
     def stop(self) -> None:
@@ -284,7 +318,6 @@ def _event_skeletons(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 class TestTranscriptParityAcrossSpawnModes:
     """Same logical run, same canonical events, across spawn modes."""
 
-    @pytest.mark.asyncio
     async def test_none_and_local_yield_identical_events(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -314,7 +347,6 @@ class TestTranscriptParityAcrossSpawnModes:
             "result",
         ]
 
-    @pytest.mark.asyncio
     async def test_none_emits_canonical_events(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -334,7 +366,7 @@ class TestTranscriptParityAcrossSpawnModes:
             parity_env.stop()
 
         tool_call, tool_result, result = events
-        assert set(tool_call) == {"ts", "type", "data"}
+        assert_canonical_events(events)
         assert tool_call["data"]["name"] == PARITY_TOOL
         assert tool_call["data"]["input"] == '{"q": 7}'
         assert tool_result["data"] == {"output": "parity:7"}
@@ -343,9 +375,7 @@ class TestTranscriptParityAcrossSpawnModes:
         assert result["data"]["cost_usd"] is None
         assert result["data"]["input_tokens"] > 0
         assert result["data"]["output_tokens"] > 0
-        assert {e["type"] for e in events} <= CANONICAL_EVENT_TYPES
 
-    @pytest.mark.asyncio
     async def test_local_emits_canonical_events(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -365,14 +395,13 @@ class TestTranscriptParityAcrossSpawnModes:
             parity_env.stop()
 
         tool_call, tool_result, result = events
+        assert_canonical_events(events)
         assert tool_call["data"]["name"] == PARITY_TOOL
         assert tool_call["data"]["input"] == '{"q": 7}'
         assert tool_result["data"] == {"output": "parity:7"}
         assert result["data"]["text"] == "parity final answer"
         assert result["data"]["cost_usd"] is None
-        assert {e["type"] for e in events} <= CANONICAL_EVENT_TYPES
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize("spawn", ["none", "local"])
     async def test_multi_step_step_matches_one_step(
         self, monkeypatch: pytest.MonkeyPatch, spawn: str
@@ -404,11 +433,16 @@ class TestTranscriptParityAcrossSpawnModes:
 
         assert _event_skeletons(multi_events) == _event_skeletons(one_step_events)
 
-    @pytest.mark.asyncio
+    @pytest.mark.parametrize("spawn", ["none", "local"])
     async def test_failed_run_emits_error_event(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, spawn: str
     ) -> None:
-        """A failing spawn:none run persists a canonical error event."""
+        """A failing run persists a canonical error event, in both modes.
+
+        spawn:none fails in DirectExecutor; spawn:local fails in the
+        subprocess child (dead OPENAI_BASE_URL is inherited) and the
+        error event crosses the stdin/stdout boundary.
+        """
         monkeypatch.setenv("OPENAI_API_KEY", "parity-test-dummy-key")
         monkeypatch.setenv(
             "CLOUD_AGENTS_TOOLS_MODULE", "tests.integration.cloud_agents.parity_tools"
@@ -421,7 +455,7 @@ class TestTranscriptParityAcrossSpawnModes:
             transcript_store=InMemoryTranscriptStore(),
         )
         outcome = await _run_to_terminal(
-            runner, _workflow_input(_one_step_definition("none"))
+            runner, _workflow_input(_one_step_definition(spawn))
         )
         assert outcome["status"] == "failed", outcome
 
@@ -430,7 +464,6 @@ class TestTranscriptParityAcrossSpawnModes:
         assert set(events[0]["data"]) == {"message"}
         assert events[0]["data"]["message"]
 
-    @pytest.mark.asyncio
     async def test_get_step_transcripts_exposes_canonical_events(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -449,11 +482,114 @@ class TestTranscriptParityAcrossSpawnModes:
             parity_env.stop()
 
         assert "result" in transcripts
-        body = transcripts["result"]
-        events = body["events"]
+        events = transcripts["result"]["events"]
         assert [e["type"] for e in events] == ["tool_call", "tool_result", "result"]
-        for event in events:
-            assert set(event) == {"ts", "type", "data"}
+        assert_canonical_events(events)
+
+
+class TestQueryDirectFollowUpTurnAfterToolCall:  # pylint: disable=too-few-public-methods
+    """/query/direct conversation continuity across tool-call turns.
+
+    Regression (lightspeed-stack #58 review): canonical transcript
+    events carry no tool_call_id, so the conversation-history replay
+    must synthesize ids that pair each tool result with its tool call.
+    When the pair does NOT match, pydantic-ai silently replaces the tool
+    result with an "interrupted" marker in every follow-up request --
+    the real tool output never reaches the provider again. The test
+    asserts the follow-up request carries the ACTUAL tool output with
+    ids that pair.
+    """
+
+    @pytest.mark.parametrize("q", [7, int("1" * 2100)], ids=["small", "truncated"])
+    async def test_second_turn_after_tool_call_turn_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch, q: int
+    ) -> None:
+        """A follow-up turn replays the real tool result, not a repair marker."""
+        from cloud_agents.workflow.executor.chat.runner import (  # pylint: disable=import-outside-toplevel
+            ChatWorkflowConfig,
+            ChatWorkflowRunner,
+        )
+
+        parity_env = ParityEnv(monkeypatch, capture_requests=True, q=q)
+        try:
+            transcript_store = InMemoryTranscriptStore()
+            runner = ChatWorkflowRunner(
+                run_store=InMemoryRunStateStore(),
+                transcript_store=transcript_store,
+                config=ChatWorkflowConfig(
+                    provider={"name": "openai", "model": "gpt-4o-mock"},
+                    tools=[PARITY_TOOL],
+                    tools_module="tests.integration.cloud_agents.parity_tools",
+                    spawn="none",
+                    timeout_seconds=60,
+                ),
+            )
+            conversation_id = await runner.start({"user_id": "parity-test"})
+
+            first = await runner.send_message(conversation_id, "Run the parity probe")
+            assert first.status == "completed", first.error
+
+            # The tool turn saved canonical events and tool conversation
+            # messages (no ids) that the next turn replays as history.
+            turn0_events = [
+                e.model_dump()
+                for e in transcript_store.saved[conversation_id]["turn-0"].events
+            ]
+            assert [e["type"] for e in turn0_events] == [
+                "tool_call",
+                "tool_result",
+                "result",
+            ]
+            assert_canonical_events(turn0_events)
+
+            request_count = len(parity_env.server.requests)
+            second = await runner.send_message(conversation_id, "Summarize that")
+            assert second.status == "completed", second.error
+            assert second.output is not None
+
+            if q != 7:
+                # The bounded audit arguments cannot be replayed safely.
+                # The next request retains user/assistant context while
+                # omitting both halves of the incomplete tool exchange.
+                replay_input = parity_env.server.requests[request_count]["input"]
+                assert not any(
+                    item.get("type") in {"function_call", "function_call_output"}
+                    for item in replay_input
+                )
+                assert len(turn0_events[0]["data"]["input"]) == 2000
+                return
+
+            # The regression: with mismatched synthesized call/result ids,
+            # pydantic-ai replaces the tool output with an "interrupted"
+            # marker when serializing history. The follow-up request must
+            # carry the REAL tool output, with ids that pair.
+            follow_ups = [
+                req
+                for req in parity_env.server.requests
+                if isinstance(req.get("input"), list)
+                and any(
+                    isinstance(item, dict)
+                    and item.get("type") == "function_call_output"
+                    for item in req["input"]
+                )
+            ]
+            assert follow_ups, "no follow-up request replayed the tool turn"
+            input_items = follow_ups[-1]["input"]
+            call_ids = {
+                item.get("call_id")
+                for item in input_items
+                if isinstance(item, dict) and item.get("type") == "function_call"
+            }
+            outputs = [
+                item
+                for item in input_items
+                if isinstance(item, dict) and item.get("type") == "function_call_output"
+            ]
+            assert len(outputs) == 1
+            assert outputs[0]["call_id"] in call_ids
+            assert outputs[0]["output"] == "parity:7"
+        finally:
+            parity_env.stop()
 
 
 class TestEphemeralContract:
@@ -477,3 +613,36 @@ class TestEphemeralContract:
                 ts="2026-09-30T00:00:00+00:00", type=event_type, data={}
             )
             assert event.type == event_type
+
+
+@pytest.mark.parametrize("spawn", ["none", "local"])
+@pytest.mark.parametrize("with_tools", [False, True], ids=["model-request", "agent"])
+async def test_output_schema_parsing_failure_persists_error(
+    monkeypatch: pytest.MonkeyPatch, spawn: str, with_tools: bool
+) -> None:
+    """Non-JSON schema output exposes an error through the transcript accessor."""
+    # Deliberately violate native structured output instead of using the
+    # mock's default schema-conforming placeholder.
+    monkeypatch.setattr(
+        "tests.e2e.cloud_agents.mock_llm_server._response_text_for_request",
+        lambda _request, text: text,
+    )
+    parity_env = ParityEnv(monkeypatch)
+    try:
+        runner = LocalWorkflowRunner(
+            run_state_store=InMemoryRunStateStore(),
+            transcript_store=InMemoryTranscriptStore(),
+        )
+        definition = _one_step_definition(spawn)
+        step = definition["spec"]["steps"][0]
+        step["output_schema"] = {"type": "object"}
+        if not with_tools:
+            step.pop("tools")
+        outcome = await _run_to_terminal(runner, _workflow_input(definition))
+        assert outcome["status"] == "failed", outcome
+        events = await _step_events(runner, outcome["workflow_id"])
+        assert_canonical_events(events)
+        assert events[-1]["type"] == "error"
+        assert "non-JSON" in events[-1]["data"]["message"]
+    finally:
+        parity_env.stop()

@@ -136,9 +136,9 @@ torch = [
     { index = "pytorch-cpu", group = "llslibdev" },
 ]
 # Pinned to the transcript-parity branch (canonical transcript events
-# from all spawn modes) until lightspeed-cloud-agents#273 merges to main;
+# from all spawn modes) until lightspeed-core/lightspeed-cloud-agents#273 merges to main;
 # then revert to branch = "main" and re-lock.
-lightspeed-cloud-agents = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git", rev = "91d48ab073f014564a22443f40a870cc16f47711" }
+lightspeed-cloud-agents = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git", rev = "b5a1902fb34a99492ba8c3b37580246e27890a60" }
 
 [dependency-groups]
 dev = [

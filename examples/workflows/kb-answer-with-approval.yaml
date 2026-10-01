@@ -94,7 +94,7 @@ spec:
       agent: kb-research-agent
       prompt: >-
         Draft a customer-facing answer (under 250 words) from these approved
-        findings: {{ steps.research.output.findings }}
+        findings: {{ steps.findings.output.passages }}
         Cite document IDs. No tool calls needed.
       output_key: answer
       output_schema:

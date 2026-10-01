@@ -11,6 +11,7 @@ from cloud_agents.workflow.core.execution import (
 )
 from cloud_agents.workflow.core.validation import validate_definition
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from authentication import get_auth_dependency
@@ -21,7 +22,13 @@ from log import get_logger
 from models.api.requests.agents import ApproveWorkflowRequest, RunWorkflowRequest
 from models.config import Action
 from utils.endpoints import check_configuration_loaded
-from workflow.provider_credentials import credentials_secret_for
+from workflow.catalog import (
+    LEGACY_DEPRECATION,
+    LEGACY_SUNSET,
+    ResolvedProvider,
+    normalize_definition,
+    resolve_run_provider,
+)
 from workflow.spawner_factory import build_spawner
 from workflow.submission_guard import (
     enforce_submission_hardening,
@@ -112,16 +119,68 @@ def _validate_workflow_submission(
             ) from exc
 
 
+def _prepare_submission(
+    body: RunWorkflowRequest,
+    *,
+    caller_is_admin: bool,
+    default_sandbox_image: str,
+    spawner_configured: bool,
+) -> tuple[ResolvedProvider, dict[str, Any]]:
+    """Run the submission gate and return what the workflow will run with.
+
+    Parameters:
+        body: Request body as sent by the caller.
+        caller_is_admin: Whether the caller holds the ADMIN action.
+        default_sandbox_image: The spawner's configured sandbox image.
+        spawner_configured: Whether a spawner_configuration exists.
+
+    Returns:
+        The resolved run-level provider and the normalized definition.
+
+    Raises:
+        HTTPException: 413, 400, 422 or 403 per the status-code rule; nothing
+            has been persisted when this raises.
+    """
+    reject_oversized_definition(body.definition)
+    engine = configuration.workflow_engine_configuration
+    resolved = resolve_run_provider(engine, configuration.inference, body.provider)
+    definition = normalize_definition(engine, body.definition, resolved)
+
+    # Submission-time gate (issue #55): LocalWorkflowRunner.start persists
+    # the raw definition and provider BEFORE build_graph/normalization
+    # runs, so secret-bearing, malformed, or unapproved-provider input
+    # must be rejected here -- otherwise it returns 202 and lands in
+    # workflow state first. It sees the normalized definition and the dict the
+    # stack built; the hardening check sees what the caller sent (minus the
+    # deprecated field when it was accepted as a logical name).
+    _validate_workflow_submission(definition, resolved.provider)
+    caller_provider = {
+        k: v
+        for k, v in (body.provider or {}).items()
+        if not (k == "credentials_secret" and resolved.legacy_credentials_secret)
+    }
+    enforce_submission_hardening(
+        body.definition,
+        caller_provider,
+        body.sandbox_image,
+        is_admin=caller_is_admin,
+        default_sandbox_image=default_sandbox_image,
+        spawner_configured=spawner_configured,
+    )
+    return resolved, definition
+
+
 @router.post(
     "/workflows/run",
     status_code=status.HTTP_202_ACCEPTED,
+    response_model=None,
 )
 @authorize(Action.WORKFLOW_START)
 async def start_workflow_handler(
     request: Request,
     body: RunWorkflowRequest,
     auth: Annotated[AuthTuple, Depends(get_auth_dependency())],
-) -> dict[str, Any]:
+) -> dict[str, Any] | JSONResponse:
     """Start a new workflow execution.
 
     Parameters:
@@ -130,7 +189,9 @@ async def start_workflow_handler(
         auth: Authentication tuple (used by middleware).
 
     Returns:
-        Workflow ID and initial status.
+        Workflow ID and initial status. A response carrying ``Deprecation`` and
+        ``Sunset`` headers when the caller used the deprecated
+        ``credentials_secret`` field.
     """
     user_id, username, _, _ = auth
 
@@ -144,44 +205,20 @@ async def start_workflow_handler(
         else "lightspeed-agentic-sandbox:latest"
     )
 
-    # Pipeline order (issue #51): byte cap (413), shape (422), then the
-    # stack's own rules -- forbidden caller fields (400), count caps (422)
-    # and privileged options (403) -- all before anything is persisted.
-    reject_oversized_definition(body.definition)
-    inference = configuration.inference
-    caller_provider = dict(
-        body.provider
-        or {
-            "name": inference.default_provider or "",
-            "model": inference.default_model or "",
-        }
-    )
-    provider = dict(caller_provider)
-    if "credentials_secret" not in provider:
-        cred_secret = credentials_secret_for(provider.get("name") or "")
-        if cred_secret:
-            provider["credentials_secret"] = cred_secret
-
-    # Submission-time gate (issue #55): LocalWorkflowRunner.start persists
-    # the raw definition and provider BEFORE build_graph/normalization
-    # runs, so secret-bearing, malformed, or unapproved-provider input
-    # must be rejected here -- otherwise it returns 202 and lands in
-    # workflow state first.
-    # `provider` carries the stack's injected credentials reference for the
-    # shape check; `caller_provider` keeps only the caller's keys so the
-    # credential-rejection check sees what the caller actually sent.
-    _validate_workflow_submission(body.definition, provider)
-    enforce_submission_hardening(
-        body.definition,
-        caller_provider,
-        body.sandbox_image,
-        is_admin=is_admin(request),
+    # Pipeline order (issue #51): byte cap (413), catalog resolution (400),
+    # shape (422), then the stack's own rules -- forbidden caller fields (400),
+    # count caps (422) and privileged options (403) -- all before anything is
+    # persisted.
+    resolved, definition = _prepare_submission(
+        body,
+        caller_is_admin=is_admin(request),
         default_sandbox_image=default_sandbox_image,
         spawner_configured=spawner_config is not None,
     )
+    provider = resolved.provider
 
     workflow_input = {
-        "definition": body.definition,
+        "definition": definition,
         "provider": provider,
         "sandbox_image": body.sandbox_image or default_sandbox_image,
         "approval_policy": body.approval_policy,
@@ -190,6 +227,8 @@ async def start_workflow_handler(
         "authz_context": {
             "user_id": user_id,
             "username": username,
+            "provider": resolved.catalog_name,
+            "credential_ref": resolved.credential_ref,
         },
     }
 
@@ -201,10 +240,17 @@ async def start_workflow_handler(
         username,
     )
 
-    return {
+    result = {
         "workflow_id": workflow_id,
         "status": "running",
     }
+    if resolved.legacy_credentials_secret:
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=result,
+            headers={"Deprecation": LEGACY_DEPRECATION, "Sunset": LEGACY_SUNSET},
+        )
+    return result
 
 
 @router.get("/workflows/{workflow_id}")

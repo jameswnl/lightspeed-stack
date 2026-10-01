@@ -30,6 +30,7 @@ from pydantic.dataclasses import dataclass
 
 import constants
 from log import get_logger
+from models.common.secrets import SECRET_NAME_PATTERN, SecretRef
 from utils import checks
 from utils.mcp_auth_headers import resolve_authorization_headers
 from utils.types import CompiledPatterns
@@ -728,6 +729,30 @@ class UnifiedInferenceProvider(ConfigurationBase):
         description="Additional provider-config keys merged verbatim into the "
         "synthesized provider's config block.",
     )
+
+    @field_validator("allowed_models")
+    @classmethod
+    def validate_allowed_models(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        """Reject an empty allow-list.
+
+        An empty list is ambiguous (allow nothing vs. no restriction), so it
+        fails at load; omit the field for no restriction or remove the provider.
+
+        Parameters:
+            value: The configured allow-list, or None when omitted.
+
+        Returns:
+            The allow-list unchanged.
+
+        Raises:
+            ValueError: If the list is empty.
+        """
+        if value is not None and not value:
+            raise ValueError(
+                "allowed_models must not be empty; omit it for no restriction "
+                "or remove the provider"
+            )
+        return value
 
     @field_validator("id")
     @classmethod
@@ -3117,6 +3142,156 @@ and validates ``config`` against the matching model.
 """
 
 
+ExecutorType = Literal["openai", "anthropic", "claude", "gemini", "azure", "bedrock"]
+
+
+def approved_inference_providers() -> frozenset[str]:
+    """Return the inference providers the installed cloud-agents executor supports.
+
+    Returns:
+        The executor's APPROVED_INFERENCE_PROVIDERS. Checked against the
+        installed package so drift between the stack and the executor shows
+        up at startup.
+    """
+    from cloud_agents.workflow.core.execution import (  # pylint: disable=import-outside-toplevel
+        APPROVED_INFERENCE_PROVIDERS,
+    )
+
+    return frozenset(APPROVED_INFERENCE_PROVIDERS)
+
+
+class SecretBinding(ConfigurationBase):
+    """Operator-only mapping of a logical secret name to a backend location.
+
+    Never accepted from a request. Exactly the fields of the chosen backend
+    may be set.
+
+    Attributes:
+        name: Logical name this binding resolves (matches ``SecretRef.name``).
+        backend: Where the value lives: ``env``, ``k8s`` or ``file``.
+        env: Environment variable name (backend ``env``).
+        secret_name: Kubernetes Secret name (backend ``k8s``).
+        key: Key within the Kubernetes Secret (backend ``k8s``).
+        path: File path (backend ``file``).
+    """
+
+    name: str = Field(
+        ...,
+        pattern=SECRET_NAME_PATTERN,
+        title="Logical secret name",
+        description="The SecretRef.name this binding resolves.",
+    )
+    backend: Literal["env", "k8s", "file"] = Field(
+        ...,
+        title="Backend",
+        description="Where the secret value lives.",
+    )
+    env: Optional[str] = Field(
+        default=None, title="Environment variable", description="Used by backend env."
+    )
+    secret_name: Optional[str] = Field(
+        default=None, title="Kubernetes Secret name", description="Used by backend k8s."
+    )
+    key: Optional[str] = Field(
+        default=None,
+        title="Secret key",
+        description="Key within the Secret (backend k8s).",
+    )
+    path: Optional[str] = Field(
+        default=None, title="File path", description="Used by backend file."
+    )
+
+    @model_validator(mode="after")
+    def check_backend_fields(self) -> Self:
+        """Require exactly the fields of the selected backend.
+
+        Returns:
+            The validated binding.
+
+        Raises:
+            ValueError: If a required field is missing or a field of another
+                backend is set.
+        """
+        required = {
+            "env": {"env"},
+            "k8s": {"secret_name", "key"},
+            "file": {"path"},
+        }[self.backend]
+        present = {
+            field
+            for field in ("env", "secret_name", "key", "path")
+            if getattr(self, field) is not None
+        }
+        if present != required:
+            raise ValueError(
+                f"backend '{self.backend}' needs exactly {sorted(required)}, "
+                f"got {sorted(present)}"
+            )
+        return self
+
+
+class WorkflowInferenceProvider(ConfigurationBase):
+    """One entry in the workflow provider catalog.
+
+    Attributes:
+        name: Logical name callers send.
+        executor_type: cloud-agents provider type this entry runs as.
+        credential: The single credential of this entry (a logical ref).
+        allowed_models: Models callers may use; None means any model.
+        base_url: Operator-set endpoint (Azure and self-hosted); never
+            settable by a caller.
+    """
+
+    name: str = Field(
+        ...,
+        pattern=SECRET_NAME_PATTERN,
+        title="Logical provider name",
+        description="Name callers send in the request.",
+    )
+    executor_type: ExecutorType = Field(
+        ...,
+        title="Executor provider type",
+        description="cloud-agents provider type; must be one the executor supports.",
+    )
+    credential: Optional[SecretRef] = Field(
+        default=None,
+        title="Credential",
+        description="Logical ref of the one credential this entry uses.",
+    )
+    allowed_models: Optional[list[str]] = Field(
+        default=None,
+        title="Allowed models",
+        description="Models callers may select. Omit for any model; an empty "
+        "list is rejected (remove the provider to disable it).",
+    )
+    base_url: Optional[str] = Field(
+        default=None,
+        title="Base URL",
+        description="Operator-set endpoint for Azure and self-hosted models.",
+    )
+
+    @field_validator("allowed_models")
+    @classmethod
+    def validate_allowed_models(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        """Reject an empty allow-list.
+
+        Parameters:
+            value: The configured allow-list, or None when omitted.
+
+        Returns:
+            The allow-list unchanged.
+
+        Raises:
+            ValueError: If the list is empty.
+        """
+        if value is not None and not value:
+            raise ValueError(
+                "allowed_models must not be empty; omit it for any model or "
+                "remove the provider"
+            )
+        return value
+
+
 class WorkflowEngineConfiguration(ConfigurationBase):
     """Workflow engine configuration.
 
@@ -3124,25 +3299,148 @@ class WorkflowEngineConfiguration(ConfigurationBase):
         enabled: Whether the workflow engine is active.
         max_concurrent_workflows: Maximum simultaneous workflow executions.
         transcript_retention_days: Days to retain step transcripts.
+        providers: Provider catalog. Empty means legacy mode; non-empty means
+            governed mode, where unknown names deny.
+        secrets: Registry mapping logical secret names to backend bindings.
+        default_provider: Default catalog entry on workflow paths (governed mode).
+        default_model: Default model on workflow paths (governed mode).
     """
 
     enabled: bool = Field(
-        False,
+        default=False,
         title="Enable workflow engine",
         description="Whether the /v1/workflows endpoints are active.",
     )
 
     max_concurrent_workflows: PositiveInt = Field(
-        10,
+        default=10,
         title="Max concurrent workflows",
         description="Maximum number of simultaneously running workflows.",
     )
 
     transcript_retention_days: PositiveInt = Field(
-        30,
+        default=30,
         title="Transcript retention days",
         description="Days to retain step execution transcripts.",
     )
+
+    providers: list[WorkflowInferenceProvider] = Field(
+        default_factory=list,
+        title="Workflow provider catalog",
+        description="Operator-approved inference providers for workflow runs. "
+        "Empty keeps legacy mode; non-empty switches to governed mode.",
+    )
+
+    secrets: list[SecretBinding] = Field(
+        default_factory=list,
+        title="Secret registry",
+        description="Maps logical secret names to backend bindings. "
+        "Operator-only; never accepted from a request.",
+    )
+
+    default_provider: Optional[str] = Field(
+        default=None,
+        title="Default provider",
+        description="Catalog entry used when a request names no provider "
+        "(governed mode).",
+    )
+
+    default_model: Optional[str] = Field(
+        default=None,
+        title="Default model",
+        description="Model used when a request names none (governed mode).",
+    )
+
+    @property
+    def governed(self) -> bool:
+        """Whether the catalog is non-empty (unknown names deny)."""
+        return bool(self.providers)
+
+    def provider(self, name: str) -> Optional[WorkflowInferenceProvider]:
+        """Look up a catalog entry by logical name.
+
+        Parameters:
+            name: Logical provider name.
+
+        Returns:
+            The entry, or None when the catalog has no such name.
+        """
+        return next((p for p in self.providers if p.name == name), None)
+
+    def binding(self, name: str) -> Optional[SecretBinding]:
+        """Look up a secret binding by logical name.
+
+        Parameters:
+            name: Logical secret name.
+
+        Returns:
+            The binding, or None when the registry has no such name.
+        """
+        return next((b for b in self.secrets if b.name == name), None)
+
+    @model_validator(mode="after")
+    def check_catalog(self) -> Self:
+        """Apply the load-time checks for the provider catalog and registry.
+
+        Returns:
+            The validated configuration.
+
+        Raises:
+            ValueError: If names repeat, an executor type is unapproved, a
+                credential has no env-backed binding, or the defaults do not
+                resolve in the catalog.
+        """
+        errors: list[str] = []
+        for label, names in (
+            ("provider", [p.name for p in self.providers]),
+            ("secret", [b.name for b in self.secrets]),
+        ):
+            duplicates = sorted({n for n in names if names.count(n) > 1})
+            errors.extend(f"duplicate {label} name '{n}'" for n in duplicates)
+
+        approved = approved_inference_providers() if self.providers else frozenset()
+        for entry in self.providers:
+            if entry.executor_type not in approved:
+                errors.append(
+                    f"provider '{entry.name}': executor_type "
+                    f"'{entry.executor_type}' is not approved by cloud-agents"
+                )
+            if entry.credential is None:
+                continue
+            binding = self.binding(entry.credential.name)
+            if binding is None:
+                errors.append(
+                    f"provider '{entry.name}': credential "
+                    f"'{entry.credential.name}' has no secrets binding"
+                )
+            elif binding.backend != "env":
+                # Before cloud-agents#269 inference credentials are read from
+                # os.environ by key, so only env bindings can work.
+                errors.append(
+                    f"provider '{entry.name}': inference credential must be "
+                    "env-backed before cloud-agents#269"
+                )
+
+        if self.providers:
+            default = self.provider(self.default_provider or "")
+            if default is None:
+                errors.append(
+                    "default_provider must name a catalog entry when providers "
+                    "are configured"
+                )
+            elif not self.default_model:
+                errors.append("default_model must be set when providers are configured")
+            elif (
+                default.allowed_models is not None
+                and self.default_model not in default.allowed_models
+            ):
+                errors.append(
+                    f"default_model '{self.default_model}' is not allowed by "
+                    f"provider '{default.name}'"
+                )
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self
 
 
 class SpawnerConfiguration(ConfigurationBase):

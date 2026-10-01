@@ -66,7 +66,9 @@ spec:
       agent: triage-agent
       prompt: >-
         Write a markdown triage report from this classification:
-        {{ steps.triage.output.classification }}
+        severity {{ steps.classification.output.severity }}, area
+        {{ steps.classification.output.area }}, summary
+        {{ steps.classification.output.summary }}
         Keep it under 300 words. No tool calls needed.
       output_key: report
       output_schema:

@@ -12,6 +12,8 @@
 #   expect:    HTTP status, or {pre269: N, post269: N} when the stages differ
 #   reason:    substring that must appear in the returned reasons
 #   spawner:   false = stack has no spawner_configuration
+# phase:    stack#51 phase that makes the case real; tests/unit/cloud_agents/
+#           test_workflow_contract.py runs cases up to the implemented phase
 # Statuses: 400 unknown to the deployment / forbidden field, 403 exists but not
 # for this caller, 413 too large, 422 shape or count, 202 accepted.
 # =============================================================================
@@ -28,27 +30,32 @@ defaults:
 
 workflow_cases:
   # ---- accepted -------------------------------------------------------------
-  - {name: triage as agent-user, workflow: triage-github-issue, expect: 202}
-  - {name: kb answer as agent-support, workflow: kb-answer-with-approval, expect: 202}
-  - {name: admin inline MCP with registry ref, workflow: admin-inline-mcp, expect: 202}
+  - {phase: 1, name: triage as agent-user, workflow: triage-github-issue, expect: 202}
+  - {phase: 1, name: kb answer as agent-support, workflow: kb-answer-with-approval, expect: 202}
+  - {phase: 3, name: admin inline MCP with registry ref, workflow: admin-inline-mcp, expect: 202}
   - name: credential_ref equal to the entry's credential is accepted
+    phase: 1
     workflow: triage-github-issue
     body_set: {provider.credential_ref: {name: inference/anthropic-prod}}
     expect: 202
   - name: omitted provider uses workflow_engine defaults
+    phase: 1
     workflow: triage-github-issue
     body_set: {provider: null}
     expect: 202
   - name: step may pick another model on the same entry
+    phase: 1
     workflow: kb-answer-with-approval
     set: {spec.steps.respond.inference_provider: {name: openai-team-b, model: gpt-4o-mini}}
     expect: 202
   - name: admin may run spawn none (no secret_headers servers)
+    phase: 0
     workflow: triage-github-issue
     as: [agent-admin]
     set: {spec.spawn: none, spec.mcp_servers: [], spec.allowed_skills: []}
     expect: 202
   - name: admin may use the admin-only azure entry with its pinned model
+    phase: 1
     workflow: triage-github-issue
     as: [agent-admin]
     body_set: {provider: {name: azure-eu, model: gpt-4o}}
@@ -57,61 +64,73 @@ workflow_cases:
 
   # ---- caller cannot choose credentials (G1, G2) ----------------------------
   - name: run provider credentials_secret (env var name) is rejected
+    phase: 0
     workflow: triage-github-issue
     body_set: {provider.credentials_secret: DATABASE_URL}
     expect: 400
     reason: credentials_secret
   - name: run provider credentials_secret is rejected even when null
+    phase: 0
     workflow: triage-github-issue
     body_set: {provider.credentials_secret: null}
     expect: 400
   - name: credentials_secret is rejected for admins too
+    phase: 0
     workflow: admin-inline-mcp
     body_set: {provider.credentials_secret: ANTHROPIC_API_KEY}
     expect: 400
   - name: definition.provider credentials_secret is rejected
+    phase: 0
     workflow: kb-answer-with-approval
     set: {provider.credentials_secret: DATABASE_URL}
     expect: 400
   - name: credential_ref for another entry's credential is rejected
+    phase: 1
     workflow: triage-github-issue
     body_set: {provider.credential_ref: {name: inference/openai-team-b}}
     expect: 400
     reason: credential_ref
   - name: unknown keys in the provider are rejected
+    phase: 1
     workflow: triage-github-issue
     body_set: {provider.base_url: https://evil.example.com}
     expect: 400
 
   # ---- catalog: unknown to the deployment (400) ------------------------------
   - name: unknown provider
+    phase: 1
     workflow: triage-github-issue
     body_set: {provider.name: gpt-everything}
     expect: 400
     reason: unknown provider
   - name: model outside allowed_models
+    phase: 1
     workflow: triage-github-issue
     body_set: {provider.model: claude-opus-4}
     expect: 400
     reason: not allowed
   - name: step provider on another catalog entry (same-entry rule)
+    phase: 1
     workflow: triage-github-issue
     set: {spec.steps.triage.inference_provider: {name: openai-team-b, model: gpt-4o}}
     as: [agent-admin]
     expect: 400
     reason: same catalog entry
   - name: definition.provider on another catalog entry (same-entry rule)
+    phase: 1
     workflow: triage-github-issue
     set: {provider: {name: openai-team-b, model: gpt-4o}}
     as: [agent-admin]
     expect: 400
     reason: same catalog entry
   - name: unknown MCP server name
+    phase: 3
     workflow: triage-github-issue
     set: {spec.mcp_servers: [github-readwrite]}
     expect: 400
     reason: unknown MCP
   - name: inline MCP with a raw secret_name/key header (no registry ref)
+    phase: 3
     workflow: admin-inline-mcp
     set:
       spec.steps.query.mcp_servers.0.secret_headers:
@@ -119,17 +138,20 @@ workflow_cases:
     expect: 400
     reason: registry refs
   - name: inline MCP with an unknown registry ref
+    phase: 3
     workflow: admin-inline-mcp
     set: {spec.steps.query.mcp_servers.0.secret_headers.Authorization.name: mcp/nope}
     expect: 400
 
   # ---- policy: exists, not for this caller (403) -----------------------------
   - name: agent-user cannot use the openai-team-b entry
+    phase: 2
     workflow: triage-github-issue
     body_set: {provider: {name: openai-team-b, model: gpt-4o}}
     expect: 403
     reason: not granted
   - name: agent-support cannot use the admin-only azure entry
+    phase: 2
     workflow: kb-answer-with-approval
     body_set: {provider: {name: azure-eu, model: gpt-4o}}
     set:
@@ -137,93 +159,112 @@ workflow_cases:
       spec.steps.research.inference_provider: {name: azure-eu, model: gpt-4o}
     expect: 403
   - name: agent-support cannot run the triage flow (provider, MCP, skill, tool)
+    phase: 2
     workflow: triage-github-issue
     as: [agent-support]
     expect: 403
   - name: caller without workflow_start
+    phase: 2
     workflow: triage-github-issue
     as: []
     expect: 403
     reason: workflow_start
   - name: skill not granted
+    phase: 2
     workflow: triage-github-issue
     set: {spec.steps.triage.allowed_skills: [kb-search]}
     expect: 403
     reason: skill
   - name: tool not granted
+    phase: 2
     workflow: triage-github-issue
     set: {spec.steps.triage.tools: [github.write]}
     expect: 403
     reason: tool
   - name: service account not granted
+    phase: 2
     workflow: triage-github-issue
     set: {spec.service_account: kb-runner}
     expect: 403
     reason: service account
   - name: namespace not granted
+    phase: 2
     workflow: triage-github-issue
     set: {spec.steps.triage.target_namespaces: [kube-system]}
     expect: 403
     reason: namespace
   - name: step timeout over the role limit
+    phase: 2
     workflow: triage-github-issue
     set: {spec.steps.triage.timeout_seconds: 3600}
     expect: 403
     reason: timeout
   - name: step max_tokens over the role limit
+    phase: 2
     workflow: triage-github-issue
     set: {spec.steps.triage.permissions.max_tokens: 900000}
     expect: 403
     reason: max_tokens
   - name: step max_retries over the role limit
+    phase: 2
     workflow: triage-github-issue
     set: {spec.steps.triage.max_retries: 9}
     expect: 403
     reason: max_retries
   - name: workflow timeout over the role limit
+    phase: 2
     workflow: triage-github-issue
     set: {spec.timeout_seconds: 7200}
     expect: 403
 
   # ---- spawn modes, images, advisory -----------------------------------------
   - name: spawn none as agent-user
+    phase: 0
     workflow: triage-github-issue
     set: {spec.spawn: none, spec.mcp_servers: [], spec.allowed_skills: []}
     expect: 403
     reason: spawn
   - name: spawn local on one step as agent-user
+    phase: 0
     workflow: triage-github-issue
     set: {spec.steps.report.spawn: local}
     expect: 403
   - name: ephemeral steps without spawner_configuration
+    phase: 0
     workflow: triage-github-issue
     spawner: false
     expect: 403
     reason: spawner_configuration
   - name: custom image on the request
+    phase: 0
     workflow: triage-github-issue
     body_set: {sandbox_image: evil.example.com/sandbox:latest}
     expect: 403
     reason: image
   - name: custom image on a step spawn_config
+    phase: 0
     workflow: triage-github-issue
     set: {spec.steps.triage.spawn_config.sandbox_image: evil.example.com/sandbox:latest}
     expect: 403
   - name: custom skills image
+    phase: 0
     workflow: triage-github-issue
     set: {skills: {image: evil.example.com/skills:latest}}
     expect: 403
   - name: advisory mode as agent-user
+    phase: 0
     workflow: triage-github-issue
     set: {advisory: true}
     expect: 403
     reason: advisory
   - name: advisory mode as admin
+    phase: 0
     workflow: triage-github-issue
     as: [agent-admin]
     set: {advisory: true}
     expect: 202
   - name: secret_headers MCP on spawn none (needs cloud-agents#269)
+    phase: 3
     workflow: triage-github-issue
     as: [agent-admin]
     set: {spec.spawn: none}
@@ -232,26 +273,31 @@ workflow_cases:
 
   # ---- inline MCP -------------------------------------------------------------
   - name: inline MCP as agent-user
+    phase: 3
     workflow: admin-inline-mcp
     as: [agent-user]
     expect: 403
     reason: inline MCP
   - name: inline MCP host not on the allow-list
+    phase: 3
     workflow: admin-inline-mcp
     set: {spec.steps.query.mcp_servers.0.url: "https://evil.example.com/mcp"}
     expect: 403
     reason: host
   - name: inline MCP over plain http
+    phase: 3
     workflow: admin-inline-mcp
     set: {spec.steps.query.mcp_servers.0.url: "http://mcp.internal.example.com/incidents"}
     expect: 403
     reason: https
   - name: inline MCP with credentials in the URL
+    phase: 3
     workflow: admin-inline-mcp
     set: {spec.steps.query.mcp_servers.0.url: "https://user:pw@mcp.internal.example.com/incidents"}
     expect: 403
     reason: userinfo
   - name: inline MCP with a literal header value
+    phase: 3
     workflow: admin-inline-mcp
     set: {spec.steps.query.mcp_servers.0.headers: {Authorization: "Bearer ghp_x"}}
     expect: 403
@@ -259,26 +305,32 @@ workflow_cases:
 
   # ---- limits (G9) -------------------------------------------------------------
   - name: definition over the byte cap
+    phase: 0
     workflow: triage-github-issue
     generate: {pad_bytes: 300000}
     expect: 413
   - name: too many steps
+    phase: 0
     workflow: triage-github-issue
     generate: {steps: 65}
     expect: 422
   - name: too many MCP servers on the workflow default
+    phase: 0
     workflow: triage-github-issue
     generate: {mcp_servers: 17}
     expect: 422
   - name: too many secret_headers on an inline server
+    phase: 3
     workflow: admin-inline-mcp
     generate: {secret_headers: 33}
     expect: 422
   - name: missing spec.steps
+    phase: 0
     workflow: triage-github-issue
     set: {spec.steps: []}
     expect: 422
   - name: legacy step "provider" alias is a shape error
+    phase: 0
     workflow: triage-github-issue
     set: {spec.steps.triage.provider: {name: claude-prod}}
     expect: 422
@@ -286,33 +338,43 @@ workflow_cases:
 # Config-load failures. `set` patches the parsed lightspeed-stack.yaml.
 config_cases:
   - name: allowed_models [] is rejected
+    phase: 1
     set: {workflow_engine.providers.claude-prod.allowed_models: []}
     error: allowed_models
   - name: executor_type outside APPROVED_INFERENCE_PROVIDERS
+    phase: 1
     set: {workflow_engine.providers.claude-prod.executor_type: ollama}
-    error: not approved
+    error: executor_type
   - name: credential without a secrets binding
+    phase: 1
     set: {workflow_engine.providers.claude-prod.credential.name: inference/missing}
     error: no secrets binding
   - name: pre-269 inference credential must be env-backed
+    phase: 1
     set: {workflow_engine.secrets.inference/anthropic-prod: {name: inference/anthropic-prod, backend: k8s, secret_name: s, key: k}}
     stage: pre269
     error: must be env
   - name: default_provider must be in the catalog
+    phase: 1
     set: {workflow_engine.default_provider: gone}
     error: default_provider
   - name: default_model must pass the default provider's allowed_models
+    phase: 1
     set: {workflow_engine.default_model: claude-opus-4}
     error: default_model
   - name: workflow_enabled MCP with request-bound auth
+    phase: 3
     set: {mcp_servers.github-readonly.authorization_headers: {Authorization: client}}
     error: workflow_enabled
   - name: workflow_enabled MCP with propagated headers
+    phase: 3
     set: {mcp_servers.kb-search.headers: [x-rh-identity]}
     error: propagated
   - name: MCP secret ref without a binding
+    phase: 3
     set: {mcp_servers.kb-search.secret_headers.X-API-Key.name: mcp/missing}
     error: no secrets binding
   - name: policy rule naming an undefined provider
+    phase: 2
     set: {workflow_engine.policy.rules.0.providers: [ghost]}
     error: unknown provider

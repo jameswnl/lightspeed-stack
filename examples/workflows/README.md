@@ -1,7 +1,7 @@
 # Workflows on K8s: operator setup and caller guide (post-stack#51)
 
 This folder is a self-contained, end-to-end worked example of the design in
-[stack#51, revision 2](https://github.com/jameswnl/lightspeed-stack/issues/51#issuecomment-5911977694):
+[stack#51, revision 3](https://github.com/jameswnl/lightspeed-stack/issues/51#issuecomment-5911977694):
 lightspeed-stack as the sole policy/secret boundary in front of cloud-agents.
 
 > **Status: target state, being built (feature-level TDD).** This folder
@@ -429,22 +429,23 @@ changes:
 
 ## Gaps in the plan found while building these examples
 
-Raise these on issue #51 before the phases that depend on them:
+Folded into the plan in revision 3 (phase in brackets):
 
 1. **Inline MCP refs vs the typed parse.** cloud-agents' `MCPServerConfig`
    accepts `secret_headers` only as `{secret_name, key}` (`extra=forbid`), so a
-   registry ref `{name: ...}` fails pipeline step 3 with 422. The stack must
+   registry ref `{name: ...}` fails pipeline step 3 with 422 [Phase 3]. The stack must
    rewrite inline registry refs to the executor form for the shape check
    (modelled in `reference_gate._shape_copy`).
 2. **`MCP_ALLOWED_SECRETS` must cover inline-granted secrets.** The plan
    generates it from `workflow_enabled` catalog servers only; a Secret reachable
    only through `rules[].mcp_secrets` (admin inline MCP) would be blocked by the
-   runtime guardrail. The generator here unions both.
+   runtime guardrail [Phase 3]. The generator here unions both.
 3. **`ADMIN` is never in `authorized_actions`.** Admin gates use the access
    resolver with roles stored on `request.state.user_roles` (PR #57), and no-op
-   auth modules (`k8s`, `noop`, `api-key`) make every caller admin.
+   auth modules (`k8s`, `noop`, `api-key`) make every caller admin [0a done;
+   load check in Phase 2, decision D8].
 4. **`Authorization` header values.** The K8s Secret holds the full header
-   value (including `Bearer `); confirm cloud-agents does not add a prefix.
+   value (including `Bearer `); confirm cloud-agents does not add a prefix [Phase 3 round-trip test].
 
 ---
 

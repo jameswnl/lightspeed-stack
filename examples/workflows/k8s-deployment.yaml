@@ -1,0 +1,179 @@
+# =============================================================================
+# k8s-deployment.yaml — stack Deployment and its least-privilege surroundings
+# (namespace: lightspeed). Pairs with lightspeed-stack.yaml (mounted from the
+# `lightspeed-config` ConfigMap) and the Secrets from external-secrets.yaml.
+#
+# verify.py cross-checks this file against the stack config:
+#   - every `backend: env` secret is injected as that env var, from a Secret
+#   - MCP_ALLOWED_SECRETS equals the value the stack would generate
+#   - the Role grants `get` on exactly the K8s Secrets the registry binds
+#   - pod hardening (non-root, read-only rootfs, no privilege escalation)
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lightspeed-stack
+  namespace: lightspeed
+automountServiceAccountToken: true   # k8s auth + Secret reads
+---
+# Pre-cloud-agents#269: only the MCP secrets are read via the API. Inference
+# keys arrive as env (backend: env), so they need no RBAC.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: lightspeed-stack-secret-reader
+  namespace: lightspeed
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+    resourceNames:
+      - mcp-github-readonly-token
+      - mcp-kb-search-token
+      - mcp-incidents-token
+---
+# Post-cloud-agents#269 variant (bind this one instead of the Role above): the
+# lease provider also reads the inference Secret through the API.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: lightspeed-stack-secret-reader-post-269
+  namespace: lightspeed
+  annotations:
+    example.lightspeed/stage: post-269
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+    resourceNames:
+      - lightspeed-inference-creds
+      - mcp-github-readonly-token
+      - mcp-kb-search-token
+      - mcp-incidents-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lightspeed-stack-secret-reader
+  namespace: lightspeed
+subjects:
+  - {kind: ServiceAccount, name: lightspeed-stack, namespace: lightspeed}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: lightspeed-stack-secret-reader
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lightspeed-stack
+  namespace: lightspeed
+  annotations:
+    # Pre-#269 rotation needs a restart; Reloader rolls the pods when the
+    # synced Secrets change (External Secrets updates them on refreshInterval).
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 2
+  strategy: {type: RollingUpdate, rollingUpdate: {maxUnavailable: 0, maxSurge: 1}}
+  selector:
+    matchLabels: {app: lightspeed-stack}
+  template:
+    metadata:
+      labels: {app: lightspeed-stack}
+    spec:
+      serviceAccountName: lightspeed-stack
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app: lightspeed-stack}}
+      containers:
+        - name: lightspeed-stack
+          image: quay.io/example/lightspeed-stack@sha256:b1c2d3e4b1c2d3e4b1c2d3e4b1c2d3e4b1c2d3e4b1c2d3e4b1c2d3e4b1c2d3e4
+          ports: [{containerPort: 8080, name: http}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          env:
+            # backend: env inference bindings (pre-cloud-agents#269 only).
+            - name: ANTHROPIC_API_KEY
+              valueFrom: {secretKeyRef: {name: lightspeed-inference-creds, key: ANTHROPIC_API_KEY}}
+            - name: OPENAI_TEAM_B_KEY
+              valueFrom: {secretKeyRef: {name: lightspeed-inference-creds, key: OPENAI_TEAM_B_KEY}}
+            - name: AZURE_OPENAI_API_KEY
+              valueFrom: {secretKeyRef: {name: lightspeed-inference-creds, key: AZURE_OPENAI_API_KEY}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: lightspeed-postgres, key: password}}
+            # Runtime guardrail only; the stack generates this value at startup
+            # and refuses to start if the env disagrees (so keep them equal).
+            - name: MCP_ALLOWED_SECRETS
+              value: "mcp-github-readonly-token,mcp-incidents-token,mcp-kb-search-token"
+          readinessProbe:
+            httpGet: {path: /readiness, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /liveness, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
+          volumeMounts:
+            - {name: config, mountPath: /app-root/lightspeed-stack.yaml, subPath: lightspeed-stack.yaml, readOnly: true}
+            - {name: gw-tls, mountPath: /etc/openshell-tls, readOnly: true}
+            - {name: pg-tls, mountPath: /etc/postgres-tls, readOnly: true}
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: lightspeed-config}
+        - name: gw-tls
+          secret: {secretName: openshell-gateway-tls}
+        - name: pg-tls
+          secret: {secretName: lightspeed-postgres-tls}
+        - name: data
+          persistentVolumeClaim: {claimName: lightspeed-data}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lightspeed-stack
+  namespace: lightspeed
+spec:
+  selector: {app: lightspeed-stack}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+# Default-deny egress with explicit allows, backing the "stack owns egress"
+# goal: nothing the operator did not list is reachable from the stack pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lightspeed-stack
+  namespace: lightspeed
+spec:
+  podSelector: {matchLabels: {app: lightspeed-stack}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: openshift-ingress}}
+      ports: [{port: 8080}]
+  egress:
+    - to: [{namespaceSelector: {}, podSelector: {matchLabels: {k8s-app: kube-dns}}}]
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: postgres}}}]
+      ports: [{port: 5432}]
+    - to: [{podSelector: {matchLabels: {app: llama-stack}}}]
+      ports: [{port: 8321}]
+    - to: [{podSelector: {matchLabels: {app: openshell-gateway}}}]
+      ports: [{port: 443}]
+    # kube-apiserver, LLM providers and MCP hosts all use 443/6443. NetworkPolicy
+    # has no FQDN match, so pin the destinations with an egress firewall or CIDR
+    # list limited to the endpoints in lightspeed-stack.yaml (mcp_servers[*].url,
+    # providers[*].base_url).
+    - ports: [{port: 443}, {port: 6443}]

@@ -47,7 +47,8 @@ database:
     user: lightspeed
     password: "${env.POSTGRES_PASSWORD}"
     namespace: public
-    # ssl_mode: prefer  # enable for production Postgres
+    ssl_mode: verify-full
+    ca_cert_path: /etc/postgres-tls/ca.crt   # from Secret lightspeed-postgres-tls
 
 # Role-based policy needs real roles. The k8s, noop and api-key modules use
 # no-op resolvers (no roles beyond "*", access_rules ignored, every caller
@@ -83,9 +84,9 @@ authentication:
 authorization:
   access_rules:
     - role: agent-user
-      actions: [workflow_start, workflow_view, workflow_cancel]
+      actions: [query, streaming_query, workflow_start, workflow_view, workflow_cancel]
     - role: agent-support
-      actions: [workflow_start, workflow_view, workflow_approve, workflow_cancel]
+      actions: [query, streaming_query, workflow_start, workflow_view, workflow_approve, workflow_cancel]
     - role: agent-admin
       actions: [admin]
 
@@ -126,6 +127,11 @@ workflow_engine:
       executor_type: openai
       credential: {name: inference/openai-team-b}
       # allowed_models omitted (null) = any model
+    - name: azure-eu                 # admin-only; shows operator-set base_url
+      executor_type: azure
+      credential: {name: inference/azure-eu}
+      allowed_models: [gpt-4o]
+      base_url: https://lightspeed-eu.openai.azure.com   # never caller-settable
 
   # PLAN(stack#51): defaults for cloud-agents paths (workflows, /query/direct).
   default_provider: claude-prod
@@ -139,6 +145,9 @@ workflow_engine:
     - name: inference/openai-team-b
       backend: env
       env: OPENAI_TEAM_B_KEY
+    - name: inference/azure-eu
+      backend: env
+      env: AZURE_OPENAI_API_KEY
     - name: mcp/github-readonly
       backend: k8s
       secret_name: mcp-github-readonly-token
@@ -147,6 +156,10 @@ workflow_engine:
       backend: k8s
       secret_name: mcp-kb-search-token
       key: api-key
+    - name: mcp/incidents             # only reachable via admin inline MCP
+      backend: k8s
+      secret_name: mcp-incidents-token
+      key: token
 
   # PLAN(stack#51): per-role grants. Union of matching rules; default deny.
   policy:
@@ -157,7 +170,7 @@ workflow_engine:
         mcp_servers: [github-readonly]
         mcp_secrets: [mcp/github-readonly]
         spawn: [ephemeral]
-        sandbox_images: [quay.io/example/lightspeed-agentic-sandbox:1.4]
+        sandbox_images: [quay.io/example/lightspeed-agentic-sandbox@sha256:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4]
         skills: [triage]
         tools: [github.read]
         service_accounts: [workflow-runner]
@@ -169,7 +182,7 @@ workflow_engine:
         mcp_servers: [kb-search]
         mcp_secrets: [mcp/kb-search]
         spawn: [ephemeral]
-        sandbox_images: [quay.io/example/lightspeed-agentic-sandbox:1.4]
+        sandbox_images: [quay.io/example/lightspeed-agentic-sandbox@sha256:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4]
         skills: [kb-search]
         tools: [kb.search]
         service_accounts: [kb-runner]
@@ -177,9 +190,10 @@ workflow_engine:
         limits: {max_timeout_seconds: 1200, max_tokens: 200000, max_retries: 1}
       - roles: [agent-admin]
         inherit: [agent-user, agent-support]
-        providers: [claude-prod, openai-team-b]
+        providers: [claude-prod, openai-team-b, azure-eu]
         spawn: [ephemeral, local, none]
         inline_mcp: true
+        mcp_secrets: [mcp/incidents]
         inline_mcp_hosts: [mcp.internal.example.com]
         advisory: true
 
@@ -194,7 +208,7 @@ spawner:
   type: openshell
   openshell_gateway_url: "openshell-gateway.lightspeed.svc:443"
   openshell_workspace: lcore-prod
-  sandbox_image: quay.io/example/lightspeed-agentic-sandbox:1.4
+  sandbox_image: quay.io/example/lightspeed-agentic-sandbox@sha256:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4
   openshell_tls_ca: /etc/openshell-tls/ca.crt
   openshell_tls_cert: /etc/openshell-tls/tls.crt
   openshell_tls_key: /etc/openshell-tls/tls.key

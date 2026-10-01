@@ -30,9 +30,38 @@ lightspeed-stack as the sole policy/secret boundary in front of cloud-agents.
 | `k8s-secrets.yaml` | Operator | Secret values — the only place they exist |
 | `triage-github-issue.yaml` | Caller | 2-step triage flow (role `agent-user`) |
 | `kb-answer-with-approval.yaml` | Caller | Research → human approval → answer (role `agent-support`) |
+| `admin-inline-mcp.yaml` | Caller (admin) | Inline MCP server with a registry secret ref (role `agent-admin`) |
+| `post-269-overrides.yaml` | Operator | What changes after cloud-agents#269 (K8s-bound inference credentials, leases) |
+| `k8s-deployment.yaml` | Operator | Hardened Deployment, least-privilege RBAC, NetworkPolicy |
+| `external-secrets.yaml` | Operator | Production source of the Secrets (External Secrets Operator + Vault) |
+| `cases.yaml` | Contract | 74 request/config cases with the expected status, per stage |
+| `reference_gate.py` | Contract | Reference model of the gate; replaced by the real endpoint as phases land |
+| `verify.py` | Contract | Runs everything above plus deployment cross-checks |
 
 Assumed deployment: namespace `lightspeed`, stack Deployment + ConfigMap,
 Postgres, OpenShell gateway for ephemeral sandboxes.
+
+## Goal coverage (issue #51 acceptance criteria)
+
+Each criterion maps to something in this folder that `verify.py` checks, so
+"done" for a phase means more of these run against the real stack.
+
+| #51 criterion | Where it shows up | Checked by |
+|---|---|---|
+| `ProviderSelection` / `SecretRef` contract | `provider: {name, model, credential_ref?}` in the requests below | `cases.yaml` (credential_ref match / mismatch) |
+| Provider-profile and secret registry | `workflow_engine.providers` / `secrets` / `default_*` | load checks, both stages |
+| Reject caller-chosen env var / physical ids | `credentials_secret` on run provider and `definition.provider`, unknown provider keys | `cases.yaml` § credentials (400) |
+| AuthZ: provider, model, credential, MCP, skills, tools, spawn, images, service accounts, namespaces, limits | `workflow_engine.policy.rules` | `cases.yaml` § policy / spawn / limits (403) |
+| In-process handoff contract | Part 3, "After cloud-agents#269" | `post-269-overrides.yaml` run through the same cases |
+| Process-boundary handoff contract | same section (lease redeemed over mTLS; Temporal workers get `MCP_ALLOWED_SECRETS` from config) | design only; Phase 6 |
+| No secret values in payloads, state, logs | requests carry logical names only; `k8s-secrets.yaml` has placeholders only | `verify.py` secrets checks; Phase 4 canary suite later |
+| Inline MCP URLs / literal headers | `admin-inline-mcp.yaml`, `inline_mcp_hosts` | `cases.yaml` § inline MCP |
+| OpenShell provider injection for ephemeral | `spawner` block, README Step 6 | config schema check |
+| `none` / `local` restrictions | admin-only on workflows; `direct_query_eligible` on `/query/direct` | `cases.yaml` § spawn, `direct_cases` |
+| Rotation and revocation | Step 8 (pre-#269 rules, Reloader) and Part 3 (post-#269) | documented; lease tests in Phase 6 |
+| Cleanup, redaction, cross-principal tests | not examples; Phase 4 / 6 test suites | cross-principal: `agent-support` vs triage, `agent-user` vs KB |
+| Deployment docs: K8s secrets, external managers, OpenShell | `k8s-secrets.yaml` (dev), `external-secrets.yaml`, `k8s-deployment.yaml` | `verify.py` deployment cross-checks |
+| Limits (`MAX_*`) | byte, step, MCP and secret-header caps | `cases.yaml` § limits (413 / 422) |
 
 ## The two documents (read this first)
 
@@ -59,7 +88,11 @@ or 403 (exists, but not for you) before anything is saved.
 
 ### Step 1. Put API keys and secrets in K8s Secrets
 
-Keys live only here. `k8s-secrets.yaml` in this folder defines all five:
+Keys live only in K8s Secrets. In production, do not apply values by hand:
+`external-secrets.yaml` syncs every Secret below from Vault through External
+Secrets Operator (`k8s-secrets.yaml` is the bootstrap/dev equivalent with
+`CHANGEME` placeholders; `verify.py` checks both define the same Secrets and
+keys). The Secrets:
 
 - `lightspeed-inference-creds`: `ANTHROPIC_API_KEY`, `OPENAI_TEAM_B_KEY`
   (inference keys; pre-cloud-agents#269 bindings must be `backend: env`
@@ -68,16 +101,21 @@ Keys live only here. `k8s-secrets.yaml` in this folder defines all five:
   value, including the `Bearer ` prefix; open question whether cloud-agents
   adds it, see cloud-agents#269).
 - `mcp-kb-search-token`: `api-key` (KB service key).
+- `mcp-incidents-token`: `token` (only reachable through admin inline MCP).
 - `openshell-gateway-tls`: mTLS client identity for stack → gateway.
 - `lightspeed-postgres`: `password` for the workflow-state database.
+- `lightspeed-postgres-tls`: CA for `ssl_mode: verify-full`.
 
 ```bash
 # Fill in every CHANGEME value first, then:
-kubectl apply -n lightspeed -f k8s-secrets.yaml
+kubectl apply -n lightspeed -f k8s-secrets.yaml      # dev / bootstrap
+kubectl apply -n lightspeed -f external-secrets.yaml  # production
 ```
 
-Wire them into the stack Deployment — inference keys and DB password as env,
-TLS as mounted files:
+`k8s-deployment.yaml` wires them into the stack Deployment (non-root,
+read-only rootfs, no capabilities, digest-pinned image, default-deny egress
+NetworkPolicy, RBAC limited to `get` on named Secrets). Excerpt — inference
+keys and DB password as env, TLS as mounted files:
 
 ```yaml
 # lightspeed-stack Deployment (excerpt)
@@ -96,7 +134,8 @@ volumes:
 ```
 
 The stack's ServiceAccount also needs `get` on the MCP secrets (least
-privilege: `resourceNames: [mcp-github-readonly-token, mcp-kb-search-token]`).
+privilege: `resourceNames` listing exactly the K8s-bound Secrets; `verify.py`
+checks the list matches the registry, and post-#269 adds the inference Secret).
 
 ### Step 2. Define the provider catalog, secret registry, and defaults
 
@@ -144,7 +183,7 @@ Skills are directories baked into the sandbox image — the plan does not
 change skill packaging:
 
 ```dockerfile
-FROM quay.io/example/lightspeed-agentic-sandbox:1.4
+FROM quay.io/example/lightspeed-agentic-sandbox@sha256:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4
 COPY ./skills/triage /skills/triage
 COPY ./skills/kb-search /skills/kb-search
 ```
@@ -183,7 +222,7 @@ spawner:
   type: openshell
   openshell_gateway_url: "openshell-gateway.lightspeed.svc:443"
   openshell_workspace: lcore-prod
-  sandbox_image: quay.io/example/lightspeed-agentic-sandbox:1.4
+  sandbox_image: quay.io/example/lightspeed-agentic-sandbox@sha256:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4
   openshell_tls_ca: /etc/openshell-tls/ca.crt      # from openshell-gateway-tls
   openshell_tls_cert: /etc/openshell-tls/tls.crt
   openshell_tls_key: /etc/openshell-tls/tls.key
@@ -200,7 +239,8 @@ the supervisor proxy.
 ```bash
 kubectl -n lightspeed create configmap lightspeed-config \
   --from-file=lightspeed-stack.yaml=./lightspeed-stack.yaml
-kubectl -n lightspeed rollout restart deploy/lightspeed-stack
+kubectl apply -f k8s-deployment.yaml
+kubectl -n lightspeed rollout status deploy/lightspeed-stack
 kubectl -n lightspeed logs deploy/lightspeed-stack | grep -i "config\|provider\|MCP_ALLOWED"
 ```
 
@@ -211,8 +251,10 @@ unknown provider/MCP name → 400, valid-but-ungranted item → 403 with reasons
 
 ### Step 8. Rotation and revocation on K8s (pre-cloud-agents#269 rules)
 
-- `kubectl edit secret` + **restart the stack pods** to pick up new env
-  values. In-flight sandbox steps finish on the old value; new submissions
+- Update the value in Vault; External Secrets syncs the K8s Secret within
+  `refreshInterval` and Reloader (annotation on the Deployment) **rolls the
+  stack pods** so they pick up the new env values. By hand: `kubectl edit
+  secret` + `kubectl rollout restart`. In-flight sandbox steps finish on the old value; new submissions
   use the new one after restart.
 - Removing a ref from `secrets`/`policy` affects new submissions only —
   running steps are unaffected.
@@ -252,7 +294,7 @@ workflow where `None` inherits and `[]` means explicitly empty;
 `sandbox_image` = step `spawn_config` → workflow `spawn_config` → run value
 → spawner default; provider = step → `definition.provider` → run provider.
 
-The two definitions in this folder:
+The workflow definitions in this folder (plus `admin-inline-mcp.yaml`, Part 3):
 
 - `triage-github-issue.yaml`: triage → report; inherits run provider
   `claude-prod`; workflow-default MCP/skills with the `report` step opting
@@ -316,25 +358,135 @@ a different catalog entry than the run provider → 400 (same-entry rule);
 
 ---
 
-## Verification
+## Part 3 — Other surfaces
 
-Verified by `verify.py` in this folder — run from the repo root with the
-project venv (it resolves its own paths, so it works from anywhere):
+### `/query/direct` and `/query/direct/stream`
+
+Same catalog and policy, provider and MCP selection only (`direct_cases` in
+`cases.yaml`). Chat runs `spawn: none` in-process, so it is limited to
+`direct_query_eligible` entries (`claude-prod` here, bound to its executor's
+default env key — load fails otherwise), catalog-only MCP, and no
+`secret_headers` servers until cloud-agents#269:
 
 ```bash
-.venv/bin/python examples/workflows/verify.py
+curl -s -X POST https://lightspeed.example.com/v1/query/direct \
+  -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"query": "Summarize issue 1234", "mcp_servers": []}'      # default provider
+# provider/model in the body need model_override (agent-admin only):
+#   {"query": "...", "provider": "claude-prod", "model": "claude-haiku-4-5"}
 ```
 
-What it checks:
+A follow-up turn keeps the provider/model it started with (a different one
+is 400). There is no `credential_ref` here: the entry's credential is used.
 
-- All YAML files parse; both definitions validate under the real
-  cloud-agents `WorkflowDefinition` model.
-- The auth block builds the real `JwtRolesResolver` and
-  `GenericAccessResolver`: each role maps from a token, only `agent-admin`
-  is admin, and `agent-support` alone may approve.
-- 55-assertion replay of the plan's submission gate (steps 4–5): every
-  provider/model/MCP/secret/skill/tool/spawn/image/service-account/
-  namespace/limit referenced by both definitions resolves in the catalogs
-  and is granted to the intended role.
-- The non-`PLAN` subset of `lightspeed-stack.yaml` validates against the
-  current `Configuration` schema.
+### Admin inline MCP
+
+`admin-inline-mcp.yaml` is the exception path: `https` only, no userinfo,
+host in `inline_mcp_hosts`, no literal headers, and `secret_headers` as
+registry refs (`{name: mcp/incidents}`) that the stack rewrites to
+cloud-agents' form. The ref must also be granted via `mcp_secrets`. Prefer a
+catalog entry; follow-up: named workflow templates so trusted pipelines do
+not need `inline_mcp`.
+
+### Audit events
+
+Every decision leaves one structured, names-only event on the dedicated
+`audit` logger (route it to its own sink). Examples of what operators should
+see for the flows above:
+
+```json
+{"event": "workflow_authorized", "principal": "alice", "roles": ["agent-user"],
+ "workflow_id": "wf-8f2c", "provider": "claude-prod", "model": "claude-sonnet-4-5",
+ "credential_ref": "inference/anthropic-prod", "mcp_servers": ["github-readonly"],
+ "spawn": {"triage": "ephemeral", "report": "ephemeral"}}
+{"event": "workflow_denied", "principal": "alice", "status": 403,
+ "reasons": ["provider 'openai-team-b' not granted"]}
+{"event": "secret_accessed", "workflow_id": "wf-8f2c", "step": "triage",
+ "purpose": "inference:anthropic", "ref": "inference/anthropic-prod",
+ "backend": "k8s", "outcome": "granted"}
+{"event": "lease_released", "workflow_id": "wf-8f2c", "step": "triage",
+ "purpose": "inference:anthropic", "reason": "completed"}
+```
+
+No secret value appears in any event, log line, span attribute, metric label,
+state record, transcript or API response (Phase 4 canary suite).
+
+### After cloud-agents#269 (`post-269-overrides.yaml`)
+
+`verify.py` runs every case against both stages, so you can see exactly what
+changes:
+
+| | Before cloud-agents#269 | After |
+|---|---|---|
+| Inference credential binding | `backend: env`; stack must be restarted to rotate | `backend: k8s`; read by the stack through the lease provider |
+| Handoff | names (`env` key, K8s Secret name) | short-lived lease per step, redeemed then released; cross-process via mTLS |
+| Revocation | new submissions only | next step fails closed (`credential_revoked`) |
+| Rotation | restart | next lease, no restart |
+| `secret_headers` MCP on `none`/`local`, `/query/direct` | 403 | allowed |
+| Same-entry rule | enforced | can relax (each step has its own lease) |
+| `spawn: none` / `local` | admin-only (process-wide env) | admin-only lifted once cloud-agents isolates them |
+| Stack RBAC | `get` on MCP Secrets | `get` on MCP Secrets + the inference Secret |
+
+## Gaps in the plan found while building these examples
+
+Raise these on issue #51 before the phases that depend on them:
+
+1. **Inline MCP refs vs the typed parse.** cloud-agents' `MCPServerConfig`
+   accepts `secret_headers` only as `{secret_name, key}` (`extra=forbid`), so a
+   registry ref `{name: ...}` fails pipeline step 3 with 422. The stack must
+   rewrite inline registry refs to the executor form for the shape check
+   (modelled in `reference_gate._shape_copy`).
+2. **`MCP_ALLOWED_SECRETS` must cover inline-granted secrets.** The plan
+   generates it from `workflow_enabled` catalog servers only; a Secret reachable
+   only through `rules[].mcp_secrets` (admin inline MCP) would be blocked by the
+   runtime guardrail. The generator here unions both.
+3. **`ADMIN` is never in `authorized_actions`.** Admin gates use the access
+   resolver with roles stored on `request.state.user_roles` (PR #57), and no-op
+   auth modules (`k8s`, `noop`, `api-key`) make every caller admin.
+4. **`Authorization` header values.** The K8s Secret holds the full header
+   value (including `Bearer `); confirm cloud-agents does not add a prefix.
+
+---
+
+## Verification
+
+`verify.py` is the executable contract. Run it from the repo root with the
+project venv:
+
+```bash
+uv run python examples/workflows/verify.py
+```
+
+What it checks (~185 assertions):
+
+- Every file parses; all three definitions pass the real cloud-agents
+  `WorkflowDefinition` shape check.
+- `lightspeed-stack.yaml` passes the plan's load-time checks in both stages
+  (unknown `executor_type`, `allowed_models: []`, unbound refs, bad defaults,
+  non-default eligible key, request-bound/propagated MCP headers, undefined
+  policy names), and each of those failures is also pinned as a negative case.
+- `cases.yaml`: accepted requests plus every denial (400 / 403 / 413 / 422)
+  for credentials, catalog, policy, spawn, images, advisory, inline MCP,
+  limits and `/query/direct`, in `pre269` and `post269`.
+- The non-`PLAN` subset validates against the current `Configuration` schema.
+- The real `JwtRolesResolver` / `GenericAccessResolver` give the roles and
+  admin semantics the policy assumes.
+- Deployment cross-checks: env injection and `MCP_ALLOWED_SECRETS` match the
+  registry, RBAC `resourceNames` match the K8s-bound Secrets, pod hardening,
+  digest-pinned images, and the dev and External Secrets sources agree.
+
+`reference_gate.py` is a model of the design, not the implementation. As each
+phase lands, run the same `cases.yaml` against the real endpoint and delete the
+matching part of the reference.
+
+## Production checklist
+
+- Images pinned by digest (stack, sandbox, policy `sandbox_images`).
+- Values only in the secret manager; K8s Secrets synced, never committed.
+- Role-resolving auth (`jwk-token` or `rh-identity`), not `k8s`/`noop`.
+- `ssl_mode: verify-full` to Postgres; mTLS to the OpenShell gateway.
+- Least-privilege RBAC by `resourceNames`; default-deny egress NetworkPolicy.
+- Audit logger routed to a separate sink; alerts on `workflow_denied` spikes.
+- Rotation runbook: pre-#269 restart via Reloader; post-#269 next lease.
+- Deprecation window for the legacy `{name, model}` provider form
+  (`Deprecation` / `Sunset` headers) communicated to callers before Phase 1.

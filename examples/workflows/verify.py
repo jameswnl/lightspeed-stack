@@ -1,257 +1,338 @@
-"""Verify examples/workflows coherence (plan stack#51 gate, steps 3-5).
+"""Verify the examples/workflows contract (stack#51 + cloud-agents#269).
 
-1. YAML-parse all example files.
-2. WorkflowDefinition.model_validate both definitions (logical provider names
-   pass the shape check by design: InferenceProviderSpec.name is min_length=1).
-3. Cross-reference every logical name in the definitions against the
-   lightspeed-stack.yaml catalogs (governance, plan step 4).
-4. Check the intended role's policy rules grant every referenced item
-   (policy, plan step 5), including the same-entry rule.
-5. Validate the non-PLAN subset of lightspeed-stack.yaml against the CURRENT
-   Configuration schema (scratch-only strip of PLAN keys).
+Run from anywhere with the project venv:
+
+    uv run python examples/workflows/verify.py
+
+1. Every file parses; the three workflow definitions pass the real
+   cloud-agents ``WorkflowDefinition`` shape check.
+2. ``lightspeed-stack.yaml`` passes the plan's load-time checks, before and
+   after cloud-agents#269 (``post-269-overrides.yaml`` merged on top).
+3. ``cases.yaml``: every request/config case returns the expected status in
+   each stage, via ``reference_gate.py`` (later: the real endpoint).
+4. The non-PLAN subset validates against the CURRENT ``Configuration``.
+5. Auth: real role and access resolvers behave as the policy assumes.
+6. Deployment: Deployment, RBAC and Secrets agree with the stack config.
 """
 
+import asyncio
+import base64
 import copy
+import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
 
 WF_DIR = Path(__file__).resolve().parent
-REPO_ROOT = WF_DIR.parent.parent
-sys.path.insert(0, str(REPO_ROOT / "src"))
-INTENDED_ROLE = {
-    "triage-github-issue": "agent-user",
-    "kb-answer-with-approval": "agent-support",
-}
-RUN_PROVIDER = {
-    "triage-github-issue": ("claude-prod", "claude-sonnet-4-5"),
-    "kb-answer-with-approval": ("openai-team-b", "gpt-4o"),
-}
-SPAWNER_DEFAULT_IMAGE = "quay.io/example/lightspeed-agentic-sandbox:1.4"
+sys.path.insert(0, str(WF_DIR.parent.parent / "src"))
+sys.path.insert(0, str(WF_DIR))
 
-failures = []
+import reference_gate as gate  # noqa: E402
+
+failures: list[str] = []
 
 
-def check(cond, msg):
+def check(cond: bool, msg: str) -> None:
+    """Record and print one assertion."""
     print(("PASS " if cond else "FAIL ") + msg)
     if not cond:
         failures.append(msg)
 
 
-# --- 1. parse ---
-stack = yaml.safe_load(open(f"{WF_DIR}/lightspeed-stack.yaml"))
-defs = {}
-for name in INTENDED_ROLE:
-    defs[name] = yaml.safe_load(open(f"{WF_DIR}/{name}.yaml"))
-    list(yaml.safe_load_all(open(f"{WF_DIR}/k8s-secrets.yaml")))  # multi-doc sanity
+def load(name: str):
+    """Load one YAML document."""
+    with open(WF_DIR / name, encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def load_all(name: str) -> list[dict]:
+    """Load a multi-document YAML file."""
+    with open(WF_DIR / name, encoding="utf-8") as fh:
+        return [d for d in yaml.safe_load_all(fh) if d]
+
+
+def deep_merge(base, over):
+    """Maps merge, everything else (lists, scalars) is replaced."""
+    if isinstance(base, dict) and isinstance(over, dict):
+        out = dict(base)
+        for key, value in over.items():
+            out[key] = deep_merge(base[key], value) if key in base else value
+        return out
+    return copy.deepcopy(over)
+
+
+def _key(container, token):
+    """Resolve a path token: dict key, list index, or list item by name."""
+    if isinstance(container, list):
+        if token.isdigit():
+            return int(token)
+        for i, item in enumerate(container):
+            if isinstance(item, dict) and item.get("name") == token:
+                return i
+        raise KeyError(token)
+    return token
+
+
+def patch(doc, patches):
+    """Return a copy of ``doc`` with dotted-path ``patches`` applied."""
+    doc = copy.deepcopy(doc)
+    for path, value in (patches or {}).items():
+        tokens = path.split(".")
+        cur = doc
+        for tok in tokens[:-1]:
+            k = _key(cur, tok)
+            if isinstance(cur, dict) and k not in cur:
+                cur[k] = {}
+            cur = cur[k]
+        cur[_key(cur, tokens[-1])] = value
+    return doc
+
+
+def generate(definition, spec):
+    """Build oversized inputs for the limit cases."""
+    steps = definition["spec"]["steps"]
+    if "pad_bytes" in spec:
+        definition["metadata"]["padding"] = "x" * spec["pad_bytes"]
+    while len(steps) < spec.get("steps", 0):
+        clone = copy.deepcopy(steps[0])
+        clone["name"] = f"gen{len(steps)}"
+        steps.append(clone)
+    if "mcp_servers" in spec:
+        definition["spec"]["mcp_servers"] = [f"srv{i}" for i in range(spec["mcp_servers"])]
+    if "secret_headers" in spec:
+        server = steps[0]["mcp_servers"][0]
+        server["secret_headers"] = {
+            f"H{i}": {"name": "mcp/incidents"} for i in range(spec["secret_headers"])
+        }
+    return definition
+
+
+# ---------------------------------------------------------------- 1. parsing
+stack = load("lightspeed-stack.yaml")
+overrides = load("post-269-overrides.yaml")
+stacks = {"pre269": stack, "post269": deep_merge(stack, overrides)}
+cases = load("cases.yaml")
+definitions = {
+    name: load(f"{name}.yaml")
+    for name in ("triage-github-issue", "kb-answer-with-approval", "admin-inline-mcp")
+}
+for doc in ("k8s-secrets.yaml", "external-secrets.yaml", "k8s-deployment.yaml"):
+    load_all(doc)
 check(True, "all YAML files parse")
 
-# --- 2. typed shape check with real cloud-agents models ---
-from cloud_agents.workflow.core.definition import WorkflowDefinition
+from cloud_agents.workflow.core.definition import WorkflowDefinition  # noqa: E402
 
-for name, raw in defs.items():
-    WorkflowDefinition.model_validate(raw)
+for name, raw in definitions.items():
+    WorkflowDefinition.model_validate(gate._shape_copy(raw))  # pylint: disable=W0212
     check(True, f"{name}: WorkflowDefinition shape valid")
 
-# --- catalog indexes ---
-we = stack["workflow_engine"]
-providers = {p["name"]: p for p in we["providers"]}
-secret_names = {s["name"] for s in we["secrets"]}
-mcp = {m["name"]: m for m in stack["mcp_servers"]}
-rules = {r["roles"][0]: r for r in we["policy"]["rules"]}
-# resolve inherit
-for role, rule in rules.items():
-    merged = {}
-    for parent in rule.get("inherit", []):
-        for k, v in rules[parent].items():
-            if k in ("roles", "inherit"):
-                continue
-            merged.setdefault(k, [])
-            if isinstance(v, list):
-                merged[k] = sorted(set(merged[k]) | set(v))
-            else:
-                merged[k] = v
-    for k, v in rule.items():
-        if k in ("roles", "inherit"):
+# ------------------------------------------------------------ 2. load checks
+for stage, cfg in stacks.items():
+    errors = gate.load_errors(cfg, stage)
+    check(errors == [], f"{stage}: config passes load-time checks {errors}")
+
+
+# ------------------------------------------------------------------ 3. cases
+def run(fn, *args, **kwargs):
+    """Return (status, reasons) the reference gate gives."""
+    try:
+        fn(*args, **kwargs)
+        return 202, []
+    except gate.Denied as exc:
+        return exc.status, exc.reasons
+
+
+def assert_case(label, stage, got, reasons, case):
+    """Check status and (optionally) a reason substring."""
+    exp = case["expect"]
+    want = exp[stage] if isinstance(exp, dict) else exp
+    ok = got == want
+    if ok and case.get("reason") and want != 202:
+        ok = any(case["reason"].lower() in r.lower() for r in reasons)
+    detail = "" if ok else f" (got {got} {reasons[:2]})"
+    check(ok, f"[{stage}] {label} -> {want}{detail}")
+
+
+for case in cases["workflow_cases"]:
+    base = definitions[case["workflow"]]
+    dflt = cases["defaults"][case["workflow"]]
+    for stage, cfg in stacks.items():
+        definition = generate(patch(base, case.get("set")), case.get("generate", {}))
+        body = patch(
+            {"definition": definition, "provider": copy.deepcopy(dflt["provider"])},
+            case.get("body_set"),
+        )
+        status, reasons = run(
+            gate.submit,
+            cfg,
+            body,
+            set(case.get("as", dflt["as"])),
+            stage,
+            case.get("spawner", True),
+        )
+        assert_case(case["name"], stage, status, reasons, case)
+
+for case in cases["direct_cases"]:
+    for stage, cfg in stacks.items():
+        status, reasons = run(gate.submit_direct, cfg, case["body"], set(case["as"]), stage)
+        assert_case("/query/direct: " + case["name"], stage, status, reasons, case)
+
+for case in cases["config_cases"]:
+    for stage, cfg in stacks.items():
+        if case.get("stage", stage) != stage:
             continue
-        if isinstance(v, list) and k in merged:
-            merged[k] = sorted(set(merged[k]) | set(v))
-        else:
-            merged[k] = v
-    rule["effective"] = merged
+        errors = gate.load_errors(patch(cfg, case["set"]), stage)
+        ok = any(case["error"].lower() in e.lower() for e in errors)
+        extra = "" if ok else f" (got {errors})"
+        check(ok, f"[{stage}] config: {case['name']} -> load fails{extra}")
 
-grants = lambda role, key: rules[role]["effective"].get(key, [])
-
-
-def eff_list(step_val, wf_val):
-    """Merge rule: step wins; None inherits; [] explicitly empty."""
-    return wf_val if step_val is None else step_val
-
-
-# --- 3+4. per-definition governance + policy checks ---
-for name, raw in defs.items():
-    role = INTENDED_ROLE[name]
-    run_provider, run_model = RUN_PROVIDER[name]
-    spec = raw["spec"]
-    wf_mcp = spec.get("mcp_servers") or []
-    wf_skills = spec.get("allowed_skills") or []
-    wf_spawn = spec.get("spawn")
-
-    # run-level provider: catalog + allowed_models + role grant
-    check(run_provider in providers, f"{name}: run provider in catalog")
-    entry = providers[run_provider]
-    am = entry.get("allowed_models")
-    check(am is None or run_model in am, f"{name}: run model allowed")
-    check(run_provider in grants(role, "providers"), f"{name}: role may use provider")
-    check(
-        entry["credential"]["name"] in secret_names, f"{name}: entry credential bound"
-    )
-
-    # definition.provider: same-entry rule
-    if raw.get("provider"):
-        check(
-            raw["provider"]["name"] == run_provider,
-            f"{name}: definition.provider same entry as run provider",
-        )
-
-    for step in spec["steps"]:
-        s = step["name"]
-        if step.get("type", "agent") != "agent":
-            continue
-        # step provider override: same-entry rule
-        ip = step.get("inference_provider")
-        if ip:
-            check(ip["name"] == run_provider, f"{name}/{s}: step provider same entry")
-            check(am is None or ip["model"] in am, f"{name}/{s}: step model allowed")
-        # MCP: catalog + workflow_enabled + role grant
-        for m in eff_list(step.get("mcp_servers"), wf_mcp):
-            check(m in mcp, f"{name}/{s}: MCP {m} in catalog")
-            check(
-                mcp[m].get("workflow_enabled") is True,
-                f"{name}/{s}: MCP {m} workflow_enabled",
-            )
-            check(m in grants(role, "mcp_servers"), f"{name}/{s}: role may use MCP {m}")
-            for ref in (mcp[m].get("secret_headers") or {}).values():
-                check(ref["name"] in secret_names, f"{name}/{s}: MCP secret ref bound")
-                check(
-                    ref["name"] in grants(role, "mcp_secrets"),
-                    f"{name}/{s}: role granted MCP secret (principal,server,ref)",
-                )
-        # skills: role grant
-        for sk in eff_list(step.get("allowed_skills"), wf_skills):
-            check(sk in grants(role, "skills"), f"{name}/{s}: role may use skill {sk}")
-        # tools
-        for t in step.get("tools", []):
-            check(t in grants(role, "tools"), f"{name}/{s}: role may use tool {t}")
-        # spawn: step -> workflow -> ephemeral
-        spawn = step.get("spawn") or wf_spawn or "ephemeral"
-        check(spawn in grants(role, "spawn"), f"{name}/{s}: role may use spawn {spawn}")
-        # image: run/step override or spawner default
-        img = (step.get("spawn_config") or {}).get(
-            "sandbox_image"
-        ) or SPAWNER_DEFAULT_IMAGE
-        check(img in grants(role, "sandbox_images"), f"{name}/{s}: image allowed")
-        # service account: step -> workflow
-        sa = step.get("service_account") or spec.get("service_account")
-        check(
-            sa in grants(role, "service_accounts"),
-            f"{name}/{s}: service account allowed",
-        )
-        # namespaces
-        for ns in step.get("target_namespaces", []):
-            check(ns in grants(role, "namespaces"), f"{name}/{s}: namespace allowed")
-        # limits
-        lim = rules[role]["effective"].get("limits", {})
-        if step.get("timeout_seconds"):
-            check(
-                step["timeout_seconds"] <= lim["max_timeout_seconds"],
-                f"{name}/{s}: timeout within limit",
-            )
-        perms = step.get("permissions") or {}
-        if perms.get("max_tokens"):
-            check(
-                perms["max_tokens"] <= lim["max_tokens"],
-                f"{name}/{s}: tokens within limit",
-            )
-        check(
-            step.get("max_retries", 0) <= lim.get("max_retries", 0),
-            f"{name}/{s}: retries within limit",
-        )
-    if spec.get("timeout_seconds"):
-        check(
-            spec["timeout_seconds"]
-            <= rules[role]["effective"]["limits"]["max_timeout_seconds"],
-            f"{name}: workflow timeout within limit",
-        )
-
-# --- 5. current-schema validation of the non-PLAN subset (scratch strip) ---
+# ------------------------------------------------------ 4. current schema
 stripped = copy.deepcopy(stack)
-we_s = stripped["workflow_engine"]
-for k in ("providers", "secrets", "default_provider", "default_model", "policy"):
-    we_s.pop(k, None)
-for m in stripped["mcp_servers"]:
-    m.pop("secret_headers", None)
-    m.pop("workflow_enabled", None)
-
-import os
-import tempfile
-
+for key in ("providers", "secrets", "default_provider", "default_model", "policy"):
+    stripped["workflow_engine"].pop(key, None)
+for server in stripped["mcp_servers"]:
+    server.pop("secret_headers", None)
+    server.pop("workflow_enabled", None)
 os.environ.setdefault("POSTGRES_PASSWORD", "test-only")
+# FilePath fields point at mounted Secrets in-cluster; stand in dummy files.
+for section, keys in (
+    (stripped["spawner"], ("openshell_tls_ca", "openshell_tls_cert", "openshell_tls_key")),
+    (stripped["database"]["postgres"], ("ca_cert_path",)),
+):
+    for key in keys:
+        fd, path = tempfile.mkstemp()
+        os.close(fd)
+        section[key] = path
 
-# openshell_tls_* are FilePath: in-cluster they come from the mounted
-# openshell-gateway-tls Secret; stand in dummy files for local validation.
-for _key in ("openshell_tls_ca", "openshell_tls_cert", "openshell_tls_key"):
-    _fd, _path = tempfile.mkstemp()
-    os.close(_fd)
-    stripped["spawner"][_key] = _path
-
-from models.config import Configuration
+from models.config import AccessRule, Action, Configuration, JwtRoleRule  # noqa: E402
 
 Configuration.model_validate(stripped)
 check(True, "non-PLAN subset validates against CURRENT Configuration schema")
 
-# --- 6. real role resolution + access rules (auth block is not PLAN) ---
-import asyncio
-import base64
-import json
+# --------------------------------------------------------------- 5. auth
+from authorization.resolvers import GenericAccessResolver, JwtRolesResolver  # noqa: E402
 
-from authorization.resolvers import GenericAccessResolver, JwtRolesResolver
-from models.config import AccessRule, Action, JwtRoleRule
-
-_jwt = stack["authentication"]["jwk_config"]["jwt_configuration"]
-_roles = JwtRolesResolver([JwtRoleRule(**r) for r in _jwt["role_rules"]])
-_access = GenericAccessResolver(
+jwt_cfg = stack["authentication"]["jwk_config"]["jwt_configuration"]
+roles_resolver = JwtRolesResolver([JwtRoleRule(**r) for r in jwt_cfg["role_rules"]])
+access = GenericAccessResolver(
     [AccessRule(**r) for r in stack["authorization"]["access_rules"]]
 )
 
 
-def _roles_for(token_roles):
-    """Resolve roles for a token carrying the given realm roles."""
-    _b64 = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()
-    _token = ".".join([_b64({"alg": "none"}), _b64({"realm_access": {"roles": token_roles}}), "sig"])
-    _auth = ("uid", "user", False, _token)
-    return asyncio.run(_roles.resolve_roles(_auth))
+def b64(data):
+    """Base64url-encode a JSON object (unsigned test token part)."""
+    return base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
 
 
-_user = _roles_for(["lightspeed-agent-user"])
-_support = _roles_for(["lightspeed-agent-support"])
-_admin = _roles_for(["lightspeed-agent-admin"])
-check("agent-user" in _user, "token role -> agent-user")
-check("agent-support" in _support, "token role -> agent-support")
-check("agent-admin" in _admin, "token role -> agent-admin")
-check(_access.check_access(Action.WORKFLOW_START, _user), "agent-user may start")
+def roles_for(token_roles):
+    """Resolve roles for an unsigned token carrying the given realm roles."""
+    token = ".".join([b64({"alg": "none"}), b64({"realm_access": {"roles": token_roles}}), "sig"])
+    return asyncio.run(roles_resolver.resolve_roles(("uid", "user", False, token)))
+
+
+user = roles_for(["lightspeed-agent-user"])
+support = roles_for(["lightspeed-agent-support"])
+admin = roles_for(["lightspeed-agent-admin"])
 check(
-    not _access.check_access(Action.WORKFLOW_APPROVE, _user),
-    "agent-user may not approve",
+    "agent-user" in user and "agent-support" in support and "agent-admin" in admin,
+    "token roles map to agent-user/support/admin",
 )
-check(_access.check_access(Action.WORKFLOW_APPROVE, _support), "agent-support may approve")
-check(not _access.check_access(Action.ADMIN, _support), "agent-support is not admin")
-check(not _access.check_access(Action.ADMIN, _user), "agent-user is not admin")
-check(_access.check_access(Action.ADMIN, _admin), "agent-admin is admin")
+check(access.check_access(Action.WORKFLOW_START, user), "agent-user may start")
+check(not access.check_access(Action.WORKFLOW_APPROVE, user), "agent-user may not approve")
+check(access.check_access(Action.WORKFLOW_APPROVE, support), "agent-support may approve")
+check(
+    not access.check_access(Action.ADMIN, support) and not access.check_access(Action.ADMIN, user),
+    "only agent-admin is admin",
+)
+check(
+    access.check_access(Action.ADMIN, admin) and access.check_access(Action.MODEL_OVERRIDE, admin),
+    "admin implies model_override",
+)
+
+# ---------------------------------------------------------- 6. deployment
+by_kind: dict[str, list[dict]] = {}
+for d in load_all("k8s-deployment.yaml"):
+    by_kind.setdefault(d["kind"], []).append(d)
+pod = by_kind["Deployment"][0]["spec"]["template"]["spec"]
+ctr = pod["containers"][0]
+env = {e["name"]: e for e in ctr["env"]}
+pre = stacks["pre269"]["workflow_engine"]["secrets"]
+post = stacks["post269"]["workflow_engine"]["secrets"]
+
+env_refs = {}
+for binding in (b for b in pre if b["backend"] == "env"):
+    ref = env.get(binding["env"], {}).get("valueFrom", {}).get("secretKeyRef")
+    check(ref is not None, f"Deployment injects {binding['env']} from a Secret ({binding['name']})")
+    if ref:
+        env_refs[binding["env"]] = (ref["name"], ref["key"])
+generated = gate.generated_mcp_allowed_secrets(stacks["pre269"])
+check(env["MCP_ALLOWED_SECRETS"]["value"] == generated, "MCP_ALLOWED_SECRETS equals the generated value")
+check(
+    generated == gate.generated_mcp_allowed_secrets(stacks["post269"]),
+    "MCP allow-list is the same in both stages",
+)
+
+roles_by_name = {r["metadata"]["name"]: r for r in by_kind["Role"]}
+
+
+def granted(role_name):
+    """resourceNames the Role grants get on."""
+    return set(roles_by_name[role_name]["rules"][0]["resourceNames"])
+
+
+def k8s_names(secrets):
+    """K8s Secret names bound with backend: k8s."""
+    return {s["secret_name"] for s in secrets if s["backend"] == "k8s"}
+
+
+check(
+    granted("lightspeed-stack-secret-reader") == k8s_names(pre),
+    "pre-269 Role grants get on exactly the k8s-bound Secrets",
+)
+check(
+    granted("lightspeed-stack-secret-reader-post-269") == k8s_names(post),
+    "post-269 Role grants get on exactly the k8s-bound Secrets",
+)
+for role in roles_by_name.values():
+    check(role["rules"][0]["verbs"] == ["get"], f"{role['metadata']['name']}: get only, by resourceName")
+
+check(pod["securityContext"]["runAsNonRoot"] is True, "pod runs as non-root")
+sc = ctr["securityContext"]
+check(
+    sc["readOnlyRootFilesystem"] and not sc["allowPrivilegeEscalation"] and sc["capabilities"]["drop"] == ["ALL"],
+    "container hardened",
+)
+mounts = {m["name"]: m["mountPath"] for m in ctr["volumeMounts"]}
+spawner = stack["spawner"]
+check(spawner["openshell_tls_ca"].startswith(mounts["gw-tls"]), "gateway TLS paths match the mount")
+check(stack["database"]["postgres"]["ca_cert_path"].startswith(mounts["pg-tls"]), "Postgres CA path matches the mount")
+check(stack["database"]["postgres"]["ssl_mode"] == "verify-full", "Postgres uses verify-full TLS")
+check(all("@sha256:" in i for i in (ctr["image"], spawner["sandbox_image"])), "stack and sandbox images pinned by digest")
+images = {i for r in stack["workflow_engine"]["policy"]["rules"] for i in r.get("sandbox_images", [])}
+check(all("@sha256:" in i for i in images), "policy sandbox_images pinned by digest")
+check(spawner["sandbox_image"] in images, "spawner default image is granted by policy")
+
+# Secrets: dev manifest and External Secrets define the same names and keys,
+# and cover every Secret/key the stack references in either stage.
+dev_docs = load_all("k8s-secrets.yaml")
+dev = {d["metadata"]["name"]: set((d.get("stringData") or d.get("data")).keys()) for d in dev_docs}
+ext = {
+    d["spec"]["target"]["name"]: {x["secretKey"] for x in d["spec"]["data"]}
+    for d in load_all("external-secrets.yaml")
+}
+check(dev == ext, f"k8s-secrets.yaml and external-secrets.yaml match {sorted(set(dev) ^ set(ext))}")
+needed = {(s["secret_name"], s["key"]) for s in post if s["backend"] == "k8s"}
+needed |= set(env_refs.values())
+check(all(k in ext.get(n, set()) for n, k in needed), "every referenced Secret/key exists in the secret source")
+for d in dev_docs:
+    values = (d.get("stringData") or d.get("data")).values()
+    check(all("CHANGEME" in str(v) for v in values), f"{d['metadata']['name']}: placeholders only")
 
 print()
 if failures:
-    print(f"{len(failures)} FAILURES")
+    print(f"{len(failures)} FAILED")
     sys.exit(1)
 print("ALL CHECKS PASSED")

@@ -1,0 +1,43 @@
+# =============================================================================
+# post-269-overrides.yaml — what changes once cloud-agents#269 (credential
+# leases) and stack#51 Phase 6 land. Deep-merged over lightspeed-stack.yaml
+# (maps merge, lists are replaced), so `secrets` is restated in full.
+#
+# Differences from the pre-#269 stage:
+#   - inference credentials are bound to K8s Secrets, not process env: the
+#     Deployment no longer injects ANTHROPIC_API_KEY & co., and the stack
+#     hands cloud-agents a short-lived lease per step (redeemed, then released)
+#   - rotation applies at the next lease with no restart; revoking a ref fails
+#     the next step closed (`credential_revoked`)
+#   - secret_headers MCP servers become usable with spawn none/local and on
+#     /query/direct (cloud-agents resolves refs at the last step)
+#   - the stack ServiceAccount needs `get` on the inference Secret as well
+#     (see k8s-deployment.yaml, the "post-269" Role)
+# Everything else (catalog, policy, request shapes) is identical by design.
+# =============================================================================
+workflow_engine:
+  secrets:
+    - name: inference/anthropic-prod
+      backend: k8s
+      secret_name: lightspeed-inference-creds
+      key: ANTHROPIC_API_KEY
+    - name: inference/openai-team-b
+      backend: k8s
+      secret_name: lightspeed-inference-creds
+      key: OPENAI_TEAM_B_KEY
+    - name: inference/azure-eu
+      backend: k8s
+      secret_name: lightspeed-inference-creds
+      key: AZURE_OPENAI_API_KEY
+    - name: mcp/github-readonly
+      backend: k8s
+      secret_name: mcp-github-readonly-token
+      key: token
+    - name: mcp/kb-search
+      backend: k8s
+      secret_name: mcp-kb-search-token
+      key: api-key
+    - name: mcp/incidents
+      backend: k8s
+      secret_name: mcp-incidents-token
+      key: token

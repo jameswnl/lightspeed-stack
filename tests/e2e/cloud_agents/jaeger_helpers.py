@@ -1,8 +1,7 @@
 """Shared Jaeger query helpers for cloud_agents E2E OTEL tracing tests.
 
-Split out because both test_otel_tracing_e2e.py (ChatWorkflowRunner) and
-test_workflow_tracing_e2e.py (LocalWorkflowRunner) need identical Jaeger
-availability/query helpers. The `tracer` fixture itself (which installs a
+Split out of test_workflow_tracing_e2e.py (LocalWorkflowRunner) so Jaeger
+availability/query helpers can be reused. The `tracer` fixture itself (which installs a
 process-global TracerProvider) is intentionally NOT shared here — each file
 keeps its own copy and assumes standalone execution (see each file's
 docstring), since OpenTelemetry only allows one TracerProvider install per

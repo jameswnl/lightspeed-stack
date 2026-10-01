@@ -21,7 +21,6 @@ from app.endpoints import (
     providers,
     # Query endpoints for Response API support
     query,
-    query_direct,
     rags,
     responses,
     # RHEL Lightspeed rlsapi v1 compatibility
@@ -66,7 +65,6 @@ def include_routers(app: FastAPI) -> None:
     app.include_router(vector_stores.router, prefix="/v1")
     # Query endpoints
     app.include_router(query.router, prefix="/v1")
-    app.include_router(query_direct.router, prefix="/v1")
     app.include_router(streaming_query.router, prefix="/v1")
     app.include_router(stream_interrupt.router, prefix="/v1")
     app.include_router(config.router, prefix="/v1")

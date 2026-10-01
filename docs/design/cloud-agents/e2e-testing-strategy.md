@@ -159,10 +159,8 @@ name in two different files). Current layout:
 | File | Layer | Covers |
 |---|---|---|
 | `test_workflows_http_e2e.py` | real HTTP (`TestClient`) | `/v1/workflows/*`, spawn none+local+ephemeral, incl. one-step workflows |
-| `test_query_direct_handler_e2e.py` | handler-direct | `/v1/query/direct` error paths |
 | `test_step_executor_e2e.py` | step-executor dispatch (`get_step_executor(...).run(...)`) | single-step execution, spawn none+local+ephemeral |
 | `test_workflow_definitions_e2e.py` | step-executor dispatch | full workflow-YAML execution, one step-executor call per step |
-| `test_otel_tracing_e2e.py` | mid-layer (`execute_query_via_direct_executor`) | trace/span assertions for the query/direct path |
 | `test_workflow_tracing_e2e.py` | `LocalWorkflowRunner` directly | trace/span assertions for the workflow-engine path |
 | `mock_llm_server.py`, `mock_llm_env.py`, `test_mock_llm_*.py`, `jaeger_helpers.py`, `conftest.py` | infra | shared fixtures/mocks, not endpoint tests themselves |
 

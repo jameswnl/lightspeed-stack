@@ -93,7 +93,7 @@ class TestAgentRunHttpE2E:
 
         No output_schema here (unlike test_in_process_agent_run): the
         cloud-agents SubprocessExecutor has no native structured-output
-        mode yet (jameswnl/lightspeed-cloud-agents#235) -- it only embeds
+        mode yet (lightspeed-core/lightspeed-cloud-agents#235) -- it only embeds
         the schema as prompt text, which the deterministic mock LLM used
         here doesn't recognize. Matches the existing spawn:local workflow
         step test's approach (test_workflow_with_local_spawn_step), which

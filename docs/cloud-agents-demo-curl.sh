@@ -19,7 +19,7 @@
 #
 # Note: agent-local and workflow-local omit output_schema -- the
 # cloud-agents SubprocessExecutor behind spawn:local has no native
-# structured-output mode yet (jameswnl/lightspeed-cloud-agents#235), so
+# structured-output mode yet (lightspeed-core/lightspeed-cloud-agents#235), so
 # it can't reliably guarantee schema-conforming JSON the way spawn:none
 # and spawn:ephemeral can.
 #

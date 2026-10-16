@@ -324,7 +324,7 @@ mcp_servers:
 \* spawn:local's `SubprocessExecutor` only embeds `output_schema` as prompt
 text (no native structured-output request mode), unlike spawn:none/ephemeral.
 Usually fine against real models, but not guaranteed the way the other two
-modes are (jameswnl/lightspeed-cloud-agents#235).
+modes are (lightspeed-core/lightspeed-cloud-agents#235).
 
 ### Workflow Execution E2E Verified
 

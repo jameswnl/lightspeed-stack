@@ -3,15 +3,15 @@
 Companion to test_otel_tracing_e2e.py (which covers ChatWorkflowRunner) —
 this file covers the workflow-runner path (LocalWorkflowRunner, i.e.
 /v1/workflows/*). See jameswnl/lightspeed-stack#20 for full context and
-jameswnl/lightspeed-cloud-agents#179 for the originating cloud-agents issue
+lightspeed-core/lightspeed-cloud-agents#179 for the originating cloud-agents issue
 (split into #181 and #183, both now resolved).
 
 LocalWorkflowRunner already wraps every agent step's executor with
 MiddlewareExecutor(..., tracer=_tracer) (graph_translator.py), which opens a
 real `step.execute` span per step tagged with `workflow.id`/`step.name`, and
-(since jameswnl/lightspeed-cloud-agents#181) `session.id` when provided.
+(since lightspeed-core/lightspeed-cloud-agents#181) `session.id` when provided.
 LocalWorkflowRunner._execute() also opens a `workflow.execute` span around
-the whole method body (since jameswnl/lightspeed-cloud-agents#185, closing
+the whole method body (since lightspeed-core/lightspeed-cloud-agents#185, closing
 #183), so every step's span nests under it and shares its trace_id. What
 this test verifies:
 
@@ -177,7 +177,7 @@ def _assert_session_id_tag(spans: list[dict[str, Any]], session_id: str) -> None
     Set by cloud-agents' MiddlewareExecutor._span_attributes()
     (workflow/executor/middleware.py) when StepMetadata.session_id is
     non-None -- see cloud-agents#179 item 1 /
-    jameswnl/lightspeed-cloud-agents#181.
+    lightspeed-core/lightspeed-cloud-agents#181.
 
     Parameters:
         spans: Span dicts (e.g. from spans_with_operation()).
@@ -202,9 +202,9 @@ class TestNoPauseWorkflowTracing:
 
         workflow.id and session.id are set by graph_translator.py's
         MiddlewareExecutor wiring (session.id since
-        jameswnl/lightspeed-cloud-agents#181). The shared trace_id is set by
+        lightspeed-core/lightspeed-cloud-agents#181). The shared trace_id is set by
         LocalWorkflowRunner._execute()'s enclosing `workflow.execute` span
-        (jameswnl/lightspeed-cloud-agents#185, closing cloud-agents#183) --
+        (lightspeed-core/lightspeed-cloud-agents#185, closing cloud-agents#183) --
         before that fix, each step opened as an independent root span/trace.
         """
         _ = tracer
@@ -247,7 +247,7 @@ class TestNoPauseWorkflowTracing:
             f"trace_id, found {len(trace_ids)}: {sorted(trace_ids)}. This "
             "would be a regression of LocalWorkflowRunner's enclosing "
             "`workflow.execute` span -- see "
-            "jameswnl/lightspeed-cloud-agents#183 / #185."
+            "lightspeed-core/lightspeed-cloud-agents#183 / #185."
         )
 
 
@@ -375,7 +375,7 @@ class TestPauseResumeWorkflowTracing:
         asserted for real below (including at the individual-span level,
         not just via the Jaeger tag-query filter), plus an OTEL span Link
         from the first post-resume span back to the pre-pause trace, per
-        jameswnl/lightspeed-cloud-agents#181 (cloud-agents#179 item 2).
+        lightspeed-core/lightspeed-cloud-agents#181 (cloud-agents#179 item 2).
         """
         _ = tracer
         if not await check_jaeger_available():
@@ -411,7 +411,7 @@ class TestPauseResumeWorkflowTracing:
 
         assert linked_trace_ids & pre_pause_trace_ids, (
             "Expected a post-resume span to carry an OTEL span Link back to "
-            "the pre-pause trace (jameswnl/lightspeed-cloud-agents#181, "
+            "the pre-pause trace (lightspeed-core/lightspeed-cloud-agents#181, "
             "cloud-agents#179 item 2). Observed reference trace_ids: "
             f"{sorted(filter(None, linked_trace_ids))}, pre-pause trace_ids: "
             f"{sorted(pre_pause_trace_ids)}."

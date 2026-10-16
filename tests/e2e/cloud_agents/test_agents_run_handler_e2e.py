@@ -259,7 +259,7 @@ class TestAgentRunLocalSpawnE2E:
 
     No output_schema here: the cloud-agents SubprocessExecutor behind
     spawn=local has no native structured-output mode yet
-    (jameswnl/lightspeed-cloud-agents#235).
+    (lightspeed-core/lightspeed-cloud-agents#235).
     """
 
     @pytest.mark.asyncio

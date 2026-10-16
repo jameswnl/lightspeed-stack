@@ -20,7 +20,7 @@ a real `OPENAI_API_KEY` against real OpenAI.
 HTTP-tested in `test_agents_run_http_e2e.py::test_local_spawn_agent_run`. Note
 that test omits `output_schema`: the cloud-agents `SubprocessExecutor` behind
 `spawn:local` has no native structured-output mode yet
-(jameswnl/lightspeed-cloud-agents#235), so it can't reliably guarantee
+(lightspeed-core/lightspeed-cloud-agents#235), so it can't reliably guarantee
 schema-conforming JSON the way `spawn:none`/`spawn:ephemeral` can.
 
 ## Goals

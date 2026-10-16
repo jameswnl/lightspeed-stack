@@ -10,7 +10,7 @@ is a copy-pasteable command with its success criterion.
 | Piece | Source | Notes |
 |---|---|---|
 | lightspeed-stack (this repo, branch `harness-uie-demo-1`) | fork | `pyproject.toml` pins `lightspeed-cloud-agents` to immutable rev `a5b30eb` (PR #264) via `[tool.uv.sources]`; `uv sync` always installs exactly that commit. Bumping requires deliberately editing the rev -- re-run `make demo-agents-workflows-all` after any bump. |
-| lightspeed-cloud-agents | `lightspeed-core/lightspeed-cloud-agents` (upstream org repo) | Installed automatically by `uv sync` at the immutable rev pin; you do not need to clone it unless developing on it. |
+| lightspeed-cloud-agents | `jameswnl/lightspeed-cloud-agents` branch `harness-uie-demo-1` (upstream + fixes for [lightspeed-core#274](https://github.com/lightspeed-core/lightspeed-cloud-agents/issues/274)) | Installed automatically by `uv sync` at the immutable rev pin; you do not need to clone it unless developing on it. Flips back to the `lightspeed-core` upstream repo once #274 merges. |
 | Kind cluster + OpenShell gateway + Agent Sandbox controller | [`infra4dev`](https://github.com/jameswnl/infra4dev) | Gateway listens on `localhost:9080` (NodePort 30080 -> hostPort 9080), TLS/auth disabled. |
 | Mock pod-status MCP server | infra4dev (`mcp-pod-status-mock/`) | Deterministic K8s tools for the demo scenarios; deployed into the gateway namespace. |
 | Observability (OTel collector + Jaeger) | infra4dev (`podman-obs-up`) | OTLP at `:4317`/`:4318`, Jaeger UI at `:16686`. |
@@ -134,12 +134,11 @@ podman machine stop                        # optional
 
 ## Known flakes (environment is fine -- rerun the scenario)
 
-- `workflow-ephemeral-approval` occasionally completes with the
-  `remediate` step seeing the literal `{{ steps.triage_result... }}`
-  template instead of the expanded root cause: the local runner's
-  resume-path interpolation fails open (cloud-agents issue, present at
-  the pinned commit; no upstream fix at time of writing).
-- Rare `agent returned success=false` with an empty transcript on the
-  first ephemeral call after a cluster rebuild: rerun. The generic error
-  text is a known gap (cloud-agents drops the sandbox's `summary` field
-  on the failure path).
+- ~~`workflow-ephemeral-approval` completing with the `remediate` step
+  seeing the literal `{{ steps.triage_result... }}` template~~ — **fixed**
+  by the pinned fork commit ([lightspeed-core#274](https://github.com/lightspeed-core/lightspeed-cloud-agents/issues/274)):
+  ephemeral steps now receive the interpolated prompt. Verified on the
+  full matrix; no literal template in any remediate transcript.
+- ~~Generic `agent returned success=false` hiding the real sandbox error~~ —
+  **fixed** by the same commit: failures now surface the sandbox's
+  `summary` (e.g. `Agent error: Failed to connect to MCP server ...`).

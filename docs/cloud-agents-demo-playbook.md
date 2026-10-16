@@ -122,12 +122,12 @@ via its own echoed section headers:
 
 Keep the `workflow_id` printed at the top -- you'll want it in step 7.
 
-Known flake: the step-chaining interpolation occasionally fails open and
-the `remediate` agent sees the literal `{{ steps.triage_result... }}`
-template instead of the expanded root cause (cloud-agents local-runner
-resume-path issue; the workflow still completes). If it happens mid-demo,
-the approval pause + completion story still lands -- just don't over-narrate
-the remediation content, or rerun the scenario.
+Step-chaining note: the `remediate` prompt's `{{ steps.triage_result... }}`
+template is interpolated before the sandbox request ships (fixed by
+[lightspeed-core#274](https://github.com/lightspeed-core/lightspeed-cloud-agents/issues/274);
+the `triage` step in this demo payload carries no MCP servers, so its
+`root_cause` is the model's best tool-less diagnosis -- if you want the
+OOMKilled story, narrate it from `agent-ephemeral`'s tool-backed run).
 
 ## 6. Show the Jaeger spans
 

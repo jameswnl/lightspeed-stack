@@ -137,10 +137,11 @@ torch = [
 ]
 # Immutable pin (not branch=main): the demo branch must stay reproducible for
 # others -- a branch ref silently floats forward on any `uv lock --upgrade`.
-# a5b30eb = cloud-agents PR #264; bumped to a110214 = PRs #262/#266 (MCP
-# resolution unification + inline step-level MCP configs), verified with
-# `make demo-agents-workflows-all` on the full local stack.
-lightspeed-cloud-agents = { git = "https://github.com/lightspeed-core/lightspeed-cloud-agents.git", rev = "a110214ad73d7f2bde4f7c201874a68c0df58cf6" }
+# Currently the fork's harness-uie-demo-1 branch: a110214 (upstream, PRs
+# #262/#266) + 3d7c9b8 (fixes #274: ephemeral prompt interpolation + sandbox
+# failure summaries), pending upstream merge -- flip the URL back to
+# lightspeed-core once merged. Verified with `make demo-agents-workflows-all`.
+lightspeed-cloud-agents = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git", rev = "3d7c9b86ebee483ecad5adb944d2ac00e4238864" }
 
 [dependency-groups]
 dev = [

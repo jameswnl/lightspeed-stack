@@ -218,7 +218,7 @@ demo-agents-workflows-server: ## Start lightspeed-stack ready for the cloud-agen
 		echo "ERROR: OPENAI_API_KEY is not set."; \
 		exit 1; \
 	fi
-	@GATEWAY="$${OPENSHELL_GATEWAY_URL:-localhost:17670}"; \
+	@GATEWAY="$${OPENSHELL_GATEWAY_URL:-localhost:9080}"; \
 	HOST="$${GATEWAY%%:*}"; PORT="$${GATEWAY##*:}"; \
 	if ! (exec 3<>"/dev/tcp/$$HOST/$$PORT") 2>/dev/null; then \
 		echo "ERROR: OpenShell gateway not reachable at $$GATEWAY."; \
@@ -240,7 +240,7 @@ demo-agents-workflows-server: ## Start lightspeed-stack ready for the cloud-agen
 	$(CONTAINER_RUNTIME) compose -f docker-compose-harness.yaml up -d --wait postgres
 	@echo "Starting lightspeed-stack (lightspeed-stack-harness.yaml) -- Ctrl-C to stop."
 	@echo "From another terminal: make demo-agents-workflows SCENARIO=<scenario>"
-	OPENSHELL_GATEWAY_URL="$${OPENSHELL_GATEWAY_URL:-localhost:17670}" \
+	OPENSHELL_GATEWAY_URL="$${OPENSHELL_GATEWAY_URL:-localhost:9080}" \
 		uv run python src/lightspeed_stack.py -c lightspeed-stack-harness.yaml
 
 demo-agents-workflows: ## Curl-based live demo against a running server (make demo-agents-workflows SCENARIO=agent-none|agent-local|agent-ephemeral|workflow-ephemeral-approval|workflow-none-approval|workflow-local|workflow-ephemeral|discover)

@@ -55,7 +55,8 @@ spawner:
   # --- Real OCP-prod gateway (confidential lcore-agents OIDC client) ---
   # Left off by default: the local Kind/Podman gateway needs no TLS and no
   # auth. To target the OCP-prod gateway, source that run's .env.ocp-prod
-  # (see ~/ws/local-infra: make ocp-prod-keycloak-lcore-client) and uncomment
+  # (see infra4dev: https://github.com/jameswnl/infra4dev -- make
+  # ocp-prod-keycloak-lcore-client) and uncomment
   # the block below. OPENSHELL_GATEWAY_URL from that file already carries the
   # :443 gRPC port. The TLS CA is the gateway's self-signed cert (certifi
   # can't verify it); set OPENSHELL_TLS_CA to e.g.

@@ -25,12 +25,14 @@
 #
 # MCP server reachability: agent-none and agent-local run in-process on
 # this machine, not inside the cluster, so they reach the mock pod-status
-# MCP server (deployed via ~/ws/local-infra's ocp-prod-mcp-pod-status-*
-# targets) at localhost:8084 -- port-forward it first:
-#   oc -n openshell-prod port-forward svc/mcp-pod-status-mock 8084:8084
+# MCP server at localhost:8084 -- port-forward it first (Kind cluster
+# deployed via infra4dev, https://github.com/jameswnl/infra4dev -- see
+# docs/cloud-agents-demo-environment.md for full bring-up):
+#   kubectl -n openshell-k8s port-forward svc/mcp-pod-status-mock 8084:8084
 # agent-ephemeral runs inside an OpenShell sandbox pod on the cluster, so
 # it reaches the same service via in-cluster DNS instead
-# (mcp-pod-status-mock:8084), no port-forward needed.
+# (mcp-pod-status-mock:8084), no port-forward needed. The mock MUST be in
+# the same namespace as the sandbox pods for that short name to resolve.
 #
 # Usage:
 #   BASE_URL=http://localhost:8090 ./docs/cloud-agents-demo-curl.sh agent-none

@@ -1,5 +1,16 @@
 # Lightspeed Core Stack Development Guide
 
+## Cloud-Agents Demo (branch `harness-uie-demo-1`)
+
+AI agents asked to set up, verify, or run the cloud-agents demo (agent
+spawn modes, OpenShell sandboxes, workflows with human approval) should
+start with `docs/cloud-agents-demo-environment.md` — a from-scratch
+bring-up where every step is a copy-pasteable command with a success
+criterion. `docs/cloud-agents-demo-playbook.md` is the human
+presentation runbook (narration order, talking points). Do not modify
+the `lightspeed-cloud-agents` rev pin in `pyproject.toml` without
+re-running `make demo-agents-workflows-all`.
+
 ## Workflow Rules
 
 ### CI/Quality Checks Before Completion

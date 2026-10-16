@@ -235,6 +235,17 @@ Lightspeed Core Stack supports the following agentic features:
 | Human-in-the-Loop | Upcoming | Interactive approval or confirmation steps |
 | Agent Skills | Supported | Domain-specific instructions loaded on demand ([Agent Skills Guide](docs/skills_guide.md)) |
 
+### Cloud-agents demo (spawn modes, sandboxes, workflows)
+
+A live demo of direct (`spawn: none`), sandboxed (`spawn: ephemeral`, real
+OpenShell sandbox pods), and multi-step workflow execution with human
+approval, tracing, and transcripts runs on the `harness-uie-demo-1`
+branch. Start with
+[docs/cloud-agents-demo-environment.md](docs/cloud-agents-demo-environment.md)
+(from-scratch bring-up; written for humans and AI agents) and see
+[docs/cloud-agents-demo-playbook.md](docs/cloud-agents-demo-playbook.md)
+for the live-presentation runbook.
+
 ## LLM Compatibility
 
 Lightspeed Core Stack (LCS) provides support for Large Language Model providers. The models listed in the table below represent specific examples that have been tested within LCS.

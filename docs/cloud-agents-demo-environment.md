@@ -9,7 +9,7 @@ is a copy-pasteable command with its success criterion.
 
 | Piece | Source | Notes |
 |---|---|---|
-| lightspeed-stack (this repo, branch `harness-uie-demo-1`) | fork | `uv.lock` pins `lightspeed-cloud-agents` at `main#a5b30eb` (PR #264). Do **not** run `uv lock --upgrade` / `uv sync --upgrade` casually -- the demo is verified against exactly that pin. |
+| lightspeed-stack (this repo, branch `harness-uie-demo-1`) | fork | `pyproject.toml` pins `lightspeed-cloud-agents` to immutable rev `a5b30eb` (PR #264) via `[tool.uv.sources]`; `uv sync` always installs exactly that commit. Bumping requires deliberately editing the rev -- re-run `make demo-agents-workflows-all` after any bump. |
 | lightspeed-cloud-agents | `jameswnl/lightspeed-cloud-agents` (mirror of upstream `lightspeed-core/...`) | Installed automatically by `uv sync` from the lock; you do not need to clone it unless developing on it. |
 | Kind cluster + OpenShell gateway + Agent Sandbox controller | [`infra4dev`](https://github.com/jameswnl/infra4dev) | Gateway listens on `localhost:9080` (NodePort 30080 -> hostPort 9080), TLS/auth disabled. |
 | Mock pod-status MCP server | infra4dev (`mcp-pod-status-mock/`) | Deterministic K8s tools for the demo scenarios; deployed into the gateway namespace. |
@@ -91,7 +91,7 @@ port conflict, so start the stack directly instead (next step).
 
 ```bash
 cd <this repo>
-uv sync --group dev --group llslibdev   # installs cloud-agents at the locked pin a5b30eb
+uv sync --group dev --group llslibdev   # installs cloud-agents at the immutable rev pin a5b30eb
 
 export OPENAI_API_KEY=...
 export OPENSHELL_GATEWAY_URL=localhost:9080

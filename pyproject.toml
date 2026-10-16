@@ -135,7 +135,12 @@ explicit = true
 torch = [
     { index = "pytorch-cpu", group = "llslibdev" },
 ]
-lightspeed-cloud-agents = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git", branch = "main" }
+# Immutable pin (not branch=main): the demo branch must stay reproducible for
+# others -- a branch ref silently floats forward on any `uv lock --upgrade`.
+# a5b30eb = cloud-agents PR #264 (agent-step span nesting), the last commit
+# this demo stack was verified against. To bump: change the rev AND re-run
+# `make demo-agents-workflows-all` before pushing.
+lightspeed-cloud-agents = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git", rev = "a5b30eb832432f78223c9bd1df6126d3a08d5c07" }
 
 [dependency-groups]
 dev = [

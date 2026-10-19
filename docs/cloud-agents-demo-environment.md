@@ -10,7 +10,7 @@ is a copy-pasteable command with its success criterion.
 | Piece | Source | Notes |
 |---|---|---|
 | lightspeed-stack (this repo, branch `harness-uie-demo-1`) | fork | `pyproject.toml` pins `lightspeed-cloud-agents` to immutable rev `a5b30eb` (PR #264) via `[tool.uv.sources]`; `uv sync` always installs exactly that commit. Bumping requires deliberately editing the rev -- re-run `make demo-agents-workflows-all` after any bump. |
-| lightspeed-cloud-agents | `jameswnl/lightspeed-cloud-agents` branch `harness-uie-demo-1` (upstream + fixes for [lightspeed-core#274](https://github.com/lightspeed-core/lightspeed-cloud-agents/issues/274)) | Installed automatically by `uv sync` at the immutable rev pin; you do not need to clone it unless developing on it. Flips back to the `lightspeed-core` upstream repo once #274 merges. |
+| lightspeed-cloud-agents | `lightspeed-core/lightspeed-cloud-agents` branch `harness-uie-demo-1` (a110214 + fixes for [lightspeed-core#274](https://github.com/lightspeed-core/lightspeed-cloud-agents/issues/274)) | Installed automatically by `uv sync`; `uv.lock` records the exact resolved commit. Re-run `make demo-agents-workflows-all` after any `uv lock --upgrade`. You do not need to clone it unless developing on it. |
 | Kind cluster + OpenShell gateway + Agent Sandbox controller | [`infra4dev`](https://github.com/jameswnl/infra4dev) | Gateway listens on `localhost:9080` (NodePort 30080 -> hostPort 9080), TLS/auth disabled. |
 | Mock pod-status MCP server | infra4dev (`mcp-pod-status-mock/`) | Deterministic K8s tools for the demo scenarios; deployed into the gateway namespace. |
 | Observability (OTel collector + Jaeger) | infra4dev (`podman-obs-up`) | OTLP at `:4317`/`:4318`, Jaeger UI at `:16686`. |

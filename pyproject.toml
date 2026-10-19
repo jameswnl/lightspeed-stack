@@ -135,13 +135,12 @@ explicit = true
 torch = [
     { index = "pytorch-cpu", group = "llslibdev" },
 ]
-# Immutable pin (not branch=main): the demo branch must stay reproducible for
-# others -- a branch ref silently floats forward on any `uv lock --upgrade`.
-# Currently the fork's harness-uie-demo-1 branch: a110214 (upstream, PRs
-# #262/#266) + 3d7c9b8 (fixes #274: ephemeral prompt interpolation + sandbox
-# failure summaries), pending upstream merge -- flip the URL back to
-# lightspeed-core once merged. Verified with `make demo-agents-workflows-all`.
-lightspeed-cloud-agents = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git", rev = "3d7c9b86ebee483ecad5adb944d2ac00e4238864" }
+# Tracks the upstream harness-uie-demo-1 branch (the only branch we touch on
+# lightspeed-core): a110214 + the #274 fixes (ephemeral prompt
+# interpolation + sandbox failure summaries). `uv.lock` records the exact
+# resolved commit for reproducibility; `uv lock --upgrade` re-resolves to
+# the branch tip. Re-run `make demo-agents-workflows-all` after any upgrade.
+lightspeed-cloud-agents = { git = "https://github.com/lightspeed-core/lightspeed-cloud-agents.git", branch = "harness-uie-demo-1" }
 
 [dependency-groups]
 dev = [

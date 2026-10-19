@@ -19,36 +19,32 @@ is a copy-pasteable command with its success criterion.
 
 ## Architecture
 
-```
-┌─ Laptop (host) ─────────────────────────────────────────────────┐
-│                                                                  │
-│  LCS harness server :8090                                        │
-│    │ spawn:none ──► OpenAI api.openai.com (gpt-5-mini, direct)    │
-│    │ spawn:none/local ──► MCP tools via localhost:8084           │
-│    │ spawn:ephemeral ──► gateway gRPC ──► sandbox pod            │
-│    │ Postgres :5432 (workflow run-state + transcripts)           │
-│    │ OTLP :4318 ──► OTel collector ──► Jaeger UI :16686          │
-│                                                                  │
-│  kubectl port-forward :8084 ──► mock MCP Service (in cluster)    │
-│                                                                  │
-└──────┬───────────────────────────────────────────────────────────┘
-       │ gRPC localhost:9080 (Kind NodePort 30080 -> hostPort 9080)
-┌──────▼───────────────────────────────────────────────────────────┐
-│  Kind cluster "local-infra" (all in namespace openshell-k8s)      │
-│                                                                  │
-│  ┌──────────────────────┐   ┌──────────────────────────────────┐  │
-│  │ OpenShell gateway    │   │ Agent Sandbox controller         │  │
-│  │ (helm chart, TLS/    │   │ (creates/manages sandbox pods)   │  │
-│  │  auth disabled)      │   └──────────────────────────────────┘  │
-│  └──────────┬───────────┘                                        │
-│              │ creates/manages                                    │
-│  ┌───────────▼──────────┐    ┌────────────────────────────────┐  │
-│  │ Sandbox pod          │───►│ mcp-pod-status-mock Svc :8084  │  │
-│  │ (ephemeral; agent    │    │ (SAME namespace -- sandbox     │  │
-│  │  server :8080; LLM ──┼───►│  pods resolve the short name   │  │
-│  │  to api.openai.com)  │    │  via same-namespace DNS)       │  │
-│  └──────────────────────┘    └────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph HOST["Laptop (host)"]
+        LCS["LCS harness server :8090"]
+        PF["kubectl port-forward :8084"]
+        PG[("Postgres :5432<br/>run-state + transcripts")]
+        OTEL["OTel collector :4318"]
+        JAEGER["Jaeger UI :16686<br/>(service: workflow-runner)"]
+        LCS --> PG
+        LCS --> OTEL --> JAEGER
+        LCS --> PF
+    end
+    subgraph KIND["Kind cluster local-infra (ns: openshell-k8s)"]
+        GW["OpenShell gateway<br/>NodePort 30080 to host 9080<br/>TLS/auth disabled"]
+        CTRL["Agent Sandbox controller"]
+        POD["Sandbox pod (ephemeral)<br/>agent server :8080"]
+        MOCK["mcp-pod-status-mock Svc :8084"]
+        GW --> POD
+        CTRL -. "manages" .-> POD
+        POD --> MOCK
+    end
+    OPENAI["OpenAI api.openai.com<br/>(gpt-5-mini)"]
+    LCS -->|"spawn:none LLM"| OPENAI
+    LCS -->|"spawn:ephemeral gRPC :9080"| GW
+    PF -->|"to Service"| MOCK
+    POD -->|"LLM"| OPENAI
 ```
 
 How the three spawn modes flow through it:

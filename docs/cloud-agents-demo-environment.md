@@ -9,13 +9,59 @@ is a copy-pasteable command with its success criterion.
 
 | Piece | Source | Notes |
 |---|---|---|
-| lightspeed-stack (this repo, branch `harness-uie-demo-1`) | fork | `pyproject.toml` pins `lightspeed-cloud-agents` to immutable rev `a5b30eb` (PR #264) via `[tool.uv.sources]`; `uv sync` always installs exactly that commit. Bumping requires deliberately editing the rev -- re-run `make demo-agents-workflows-all` after any bump. |
+| lightspeed-stack (this repo, branch `harness-uie-demo-1`) | fork | Tracks `lightspeed-core/lightspeed-cloud-agents` branch `harness-uie-demo-1` by name (see row below); `uv.lock` records the exact resolved commit. |
 | lightspeed-cloud-agents | `lightspeed-core/lightspeed-cloud-agents` branch `harness-uie-demo-1` (a110214 + fixes for [lightspeed-core#274](https://github.com/lightspeed-core/lightspeed-cloud-agents/issues/274)) | Tracks the branch tip: new cloud-agents fixes land with `uv lock --upgrade-package lightspeed-cloud-agents && uv sync` (plain `uv sync` keeps the locked commit). Re-run `make demo-agents-workflows-all` after any upgrade. You do not need to clone it unless developing on it. |
 | Kind cluster + OpenShell gateway + Agent Sandbox controller | [`infra4dev`](https://github.com/jameswnl/infra4dev) | Gateway listens on `localhost:9080` (NodePort 30080 -> hostPort 9080), TLS/auth disabled. |
 | Mock pod-status MCP server | infra4dev (`mcp-pod-status-mock/`) | Deterministic K8s tools for the demo scenarios; deployed into the gateway namespace. |
 | Observability (OTel collector + Jaeger) | infra4dev (`podman-obs-up`) | OTLP at `:4317`/`:4318`, Jaeger UI at `:16686`. |
 | Agentic sandbox image | `quay.io/jameswong/lightspeed-agentic-sandbox:latest` (public, multi-arch) | Mutable tag -- if a freshly pulled `latest` misbehaves, suspect drift; source is the public `lcs-main` branch of the sandbox fork. |
 | Postgres | local | Native install or the `postgres` service in this repo's `docker-compose-harness.yaml`. |
+
+## Architecture
+
+```
+┌─ Laptop (host) ─────────────────────────────────────────────────┐
+│                                                                  │
+│  LCS harness server :8090                                        │
+│    │ spawn:none ──► OpenAI api.openai.com (gpt-5-mini, direct)    │
+│    │ spawn:none/local ──► MCP tools via localhost:8084           │
+│    │ spawn:ephemeral ──► gateway gRPC ──► sandbox pod            │
+│    │ Postgres :5432 (workflow run-state + transcripts)           │
+│    │ OTLP :4318 ──► OTel collector ──► Jaeger UI :16686          │
+│                                                                  │
+│  kubectl port-forward :8084 ──► mock MCP Service (in cluster)    │
+│                                                                  │
+└──────┬───────────────────────────────────────────────────────────┘
+       │ gRPC localhost:9080 (Kind NodePort 30080 -> hostPort 9080)
+┌──────▼───────────────────────────────────────────────────────────┐
+│  Kind cluster "local-infra" (all in namespace openshell-k8s)      │
+│                                                                  │
+│  ┌──────────────────────┐   ┌──────────────────────────────────┐  │
+│  │ OpenShell gateway    │   │ Agent Sandbox controller         │  │
+│  │ (helm chart, TLS/    │   │ (creates/manages sandbox pods)   │  │
+│  │  auth disabled)      │   └──────────────────────────────────┘  │
+│  └──────────┬───────────┘                                        │
+│              │ creates/manages                                    │
+│  ┌───────────▼──────────┐    ┌────────────────────────────────┐  │
+│  │ Sandbox pod          │───►│ mcp-pod-status-mock Svc :8084  │  │
+│  │ (ephemeral; agent    │    │ (SAME namespace -- sandbox     │  │
+│  │  server :8080; LLM ──┼───►│  pods resolve the short name   │  │
+│  │  to api.openai.com)  │    │  via same-namespace DNS)       │  │
+│  └──────────────────────┘    └────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+How the three spawn modes flow through it:
+
+| Mode | Agent runs | LLM call | MCP tools reach |
+|---|---|---|---|
+| `none` | in-process in LCS | direct to OpenAI | `localhost:8084` (the port-forward) |
+| `local` | subprocess on host | direct to OpenAI | `localhost:8084` (the port-forward) |
+| `ephemeral` | sandbox pod in Kind | from inside the pod | `mcp-pod-status-mock:8084` (in-cluster DNS) |
+
+Workflows add Postgres persistence (run-state, per-step transcripts) and
+the human-approval pause on top of the same per-step paths; traces from
+all modes land in Jaeger under the service name `workflow-runner`.
 
 ## Prerequisites
 

@@ -123,6 +123,28 @@ make demo-agents-workflows SCENARIO=agent-ephemeral        # real sandbox (first
 make demo-agents-workflows-all                             # full matrix
 ```
 
+## Troubleshooting (environment is broken -- fix and retry)
+
+- `agent-none` / `agent-local` fail with
+  `"error": "Client failed to connect: All connection attempts failed"`:
+  the MCP mock port-forward died. It runs as a foreground `kubectl
+  port-forward` that exits silently (terminal closed, laptop slept,
+  kubeconfig changed). Check and re-establish it:
+
+  ```bash
+  nc -z -w 2 localhost 8084 || kubectl --kubeconfig ~/ws/infra4dev/kind/kubeconfig \
+    -n openshell-k8s port-forward svc/mcp-pod-status-mock 8084:8084
+  ```
+
+  (`agent-ephemeral` is unaffected -- sandboxes reach the mock via
+  in-cluster DNS, not the port-forward.)
+
+- First `agent-ephemeral` call seems hung for a minute: it is pulling the
+  ~500 MB sandbox image into the fresh Kind node. Watch progress with
+  `kubectl --kubeconfig ~/ws/infra4dev/kind/kubeconfig -n openshell-k8s
+  get pods` -- a new sandbox pod in `ContainerCreating`/`ImagePullBackOff`
+  means it is working. Subsequent calls run in ~10-20 s.
+
 ## Teardown
 
 ```bash

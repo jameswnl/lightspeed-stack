@@ -1793,7 +1793,7 @@ wheels = [
 [[package]]
 name = "lightspeed-cloud-agents"
 version = "0.1.0"
-source = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git?branch=main#6bf22a3df6efed645eb5b70ef45abc8855ef7be4" }
+source = { git = "https://github.com/jameswnl/lightspeed-cloud-agents.git?branch=main#37a084092c4ccbd2ed0049886c2021b3feaaef86" }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
